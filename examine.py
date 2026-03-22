@@ -766,8 +766,8 @@ def main():
     parser = argparse.ArgumentParser(description="Generate RIOT glider diagnostic figures")
     parser.add_argument("--gliders", nargs="+", default=["osu684", "osu685"],
                         help="Glider names to process (default: osu684 osu685)")
-    parser.add_argument("--basedir", default=os.path.dirname(os.path.abspath(__file__)),
-                        help="Base directory containing NetCDF files")
+    parser.add_argument("--basedir", default=".",
+                        help="Base directory containing NetCDF files (default: .)")
     args = parser.parse_args()
 
     for glider in args.gliders:

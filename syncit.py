@@ -50,6 +50,10 @@ def main():
         help="glider name (repeatable; default: osu684 osu685)",
     )
     parser.add_argument(
+        "--remotedir", default="/data/Dockserver/gliderfmc0",
+        help="remote directory containing glider folders (default: /data/Dockserver/gliderfmc0)",
+    )
+    parser.add_argument(
         "--target", default=".",
         help="local target directory for rsync and output files (default: .)",
     )
@@ -60,7 +64,7 @@ def main():
 
     # Step 1: rsync (must complete before conversions)
     print(f"Syncing from {args.hostname} ...")
-    sources = [f"{args.hostname}:/data/Dockserver/gliderfmc0/{g}" for g in gliders]
+    sources = [f"{args.hostname}:{args.remotedir}/{g}" for g in gliders]
     rc = subprocess.call(["rsync", "--archive", "--verbose", "--compress"] + sources + [target])
     if rc != 0:
         sys.exit(f"rsync failed with exit code {rc}")

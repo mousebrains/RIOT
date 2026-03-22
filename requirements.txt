@@ -1,0 +1,9 @@
+cartopy
+cmocean
+gsw
+matplotlib
+netCDF4
+numpy
+q2netcdf
+scipy
+slocum-tpw

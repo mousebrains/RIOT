@@ -19,10 +19,3 @@ dependencies = [
     "scipy",
     "slocum-tpw",
 ]
-
-[project.scripts]
-syncit = "riot.syncit:main"
-examine = "riot.examine:main"
-
-[tool.setuptools.packages.find]
-include = ["riot*"]

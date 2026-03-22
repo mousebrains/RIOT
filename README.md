@@ -2,26 +2,19 @@
 
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![PyPI version](https://img.shields.io/pypi/v/riot.svg)](https://pypi.org/project/riot/)
 [![CI](https://github.com/mousebrains/RIOT/actions/workflows/ci.yml/badge.svg)](https://github.com/mousebrains/RIOT/actions/workflows/ci.yml)
 
 Data acquisition and diagnostic tools for the RIOT (Rapid Investigation of Turbulence) Slocum glider deployment.
 
 ## Installation
 
-### Python package
+### Python dependencies
 
 ```sh
-pip install .
+python3 -m pip install -r requirements.txt
 ```
 
-or
-
-```sh
-pipx install .
-```
-
-This installs the Python dependencies and provides two commands: `syncit` and `examine`.
+This installs the required Python dependencies. The scripts are run directly from this directory.
 
 ### dbd2netcdf (external)
 
@@ -39,7 +32,7 @@ cd dbd2netcdf && mkdir build && cd build && cmake .. && make && make install
 Syncs raw glider data from a dockserver via rsync and converts it to NetCDF files in parallel.
 
 ```sh
-syncit [--hostname HOST] [--glider NAME ...] [--target DIR]
+./syncit.py [--hostname HOST] [--remotedir DIR] [--glider NAME ...] [--target DIR]
 ```
 
 **Options:**
@@ -47,12 +40,13 @@ syncit [--hostname HOST] [--glider NAME ...] [--target DIR]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--hostname` | `gliderfs2.ceoas.oregonstate.edu` | rsync source hostname |
+| `--remotedir` | `/data/Dockserver/gliderfmc0` | Remote directory containing glider folders |
 | `--glider` | `osu684 osu685` | Glider name (repeatable) |
 | `--target` | `.` | Local directory for synced data and output files |
 
 **What it does:**
 
-1. **rsync** — pulls each glider's `from-glider/` and `logs/` directories from `/data/Dockserver/gliderfmc0/` on the source host.
+1. **rsync** — pulls each glider's `from-glider/` and `logs/` directories from the remote directory on the source host.
 2. **Parallel conversion** — converts raw files to NetCDF using:
 
    | Source files | Tool | Output |
@@ -67,7 +61,7 @@ syncit [--hostname HOST] [--glider NAME ...] [--target DIR]
 **Example:**
 
 ```sh
-syncit --hostname myhost.example.com --glider osu684 --glider osu685 --target /data/riot
+./syncit.py --hostname myhost.example.com --glider osu684 --glider osu685 --target /data/riot
 ```
 
 ### examine
@@ -75,7 +69,7 @@ syncit --hostname myhost.example.com --glider osu684 --glider osu685 --target /d
 Generates interactive diagnostic figures from the NetCDF files produced by `syncit`.
 
 ```sh
-examine [--gliders NAME ...] [--basedir DIR]
+./examine.py [--gliders NAME ...] [--basedir DIR]
 ```
 
 **Options:**
@@ -83,7 +77,7 @@ examine [--gliders NAME ...] [--basedir DIR]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--gliders` | `osu684 osu685` | Glider names to process |
-| `--basedir` | script directory | Directory containing the NetCDF files |
+| `--basedir` | `.` | Directory containing the NetCDF files |
 
 **Figures produced (per glider):**
 
