@@ -1,0 +1,17 @@
+s: T 0 0 4 sci_generic_a nodim
+s: T 1 1 4 sci_generic_b nodim
+s: T 2 2 4 sci_generic_c nodim
+s: T 3 3 4 sci_generic_d nodim
+s: T 4 4 4 sci_generic_e nodim
+s: T 5 5 4 sci_generic_f nodim
+s: T 6 6 4 sci_generic_g nodim
+s: T 7 7 4 sci_generic_h nodim
+s: T 8 8 4 sci_generic_i nodim
+s: T 9 9 4 sci_generic_j nodim
+s: T 10 10 4 sci_generic_k nodim
+s: T 11 11 4 sci_m_present_secs_into_mission sec
+s: T 12 12 8 sci_m_present_time timestamp
+s: T 13 13 1 sci_microrider_isdp_file_state enum
+s: T 14 14 4 sci_water_cond s/m
+s: T 15 15 4 sci_water_pressure bar
+s: T 16 16 4 sci_water_temp degc

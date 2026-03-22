@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "riot"
+version = "0.1.0"
+description = "RIOT glider data sync, conversion, and diagnostics"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.10"
+dependencies = [
+    "cartopy",
+    "cmocean",
+    "gsw",
+    "matplotlib",
+    "netCDF4",
+    "numpy",
+    "q2netcdf",
+    "scipy",
+    "slocum-tpw",
+]
+
+[project.scripts]
+syncit = "riot.syncit:main"
+examine = "riot.examine:main"
+
+[tool.setuptools.packages.find]
+include = ["riot*"]
