@@ -86,7 +86,7 @@ Generates interactive diagnostic figures from the NetCDF files produced by `sync
    - Salinity vs depth
    - Density vs depth
    - Glider depth and water depth vs time
-   - Geographic track with ETOPO2022 bathymetry
+   - Geographic track with ETOPO2022 bathymetry (cached locally after first fetch)
    - Pitch and roll histograms
 
 2. **Turbulence Diagnostics** (requires MRI data)
@@ -102,6 +102,8 @@ Generates interactive diagnostic figures from the NetCDF files produced by `sync
 4. **CTD Derivatives**
    - dT/dz, dS/dz, and d-rho/dz per meter vs time and depth, using symmetric log color scaling based on data below 125 m
 
-## cache directory
+## Cache files
 
 The `cache/` directory contains `.cac` sensor-list cache files used by `dbd2netcdf` to decode Slocum binary data files. These must be present for conversion to succeed.
+
+`examine` caches ETOPO2022 bathymetry in `.bathy_cache.pkl` (inside `--basedir`) after the first OPeNDAP fetch to avoid repeated network requests. The cache is automatically extended if a future run covers a larger geographic area. Delete `.bathy_cache.pkl` to force a fresh download.
