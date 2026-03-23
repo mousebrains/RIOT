@@ -34,8 +34,9 @@ def convert(target, glider, subdir, pattern, tool, suffix):
     else:  # q2netcdf
         cmd = ["q2netcdf", "--nc", out] + files
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return (f"{glider} {pattern} -> {out}", result.returncode, result.stderr)
+    result = subprocess.run(cmd, capture_output=True)
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    return (f"{glider} {pattern} -> {out}", result.returncode, stderr)
 
 
 
