@@ -6,6 +6,7 @@
 
 import argparse
 import os
+import pickle
 import numpy as np
 import netCDF4 as nc
 import gsw
@@ -13,14 +14,20 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.collections import LineCollection
 from matplotlib.colors import SymLogNorm
-from datetime import datetime, timezone
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
+from concurrent.futures import ThreadPoolExecutor
 from scipy.signal import find_peaks
 from scipy.ndimage import median_filter
 from matplotlib.widgets import Button
 from matplotlib.lines import Line2D
 import cmocean
+
+_EPOCH = np.datetime64(0, "s")
+_ONE_SEC = np.timedelta64(1, "s")
+
+
+def _dt64_to_epoch(arr):
+    """Convert datetime64 array to float64 POSIX seconds."""
+    return (arr - _EPOCH) / _ONE_SEC
 
 
 def mk_degrees(vals):
@@ -51,9 +58,7 @@ def load_nc(fn, time_var):
     for k in data:
         if data[k].shape == t.shape:
             data[k] = data[k][valid]
-    data["t_dt"] = np.array(
-        [datetime.fromtimestamp(ts, tz=timezone.utc) for ts in data[time_var]],
-    )
+    data["t_dt"] = (data[time_var] * 1e6).astype("datetime64[us]")
     return data
 
 
@@ -63,8 +68,8 @@ def sci_update(sci, gps_t, gps_lat, gps_lon):
     cond = sci["sci_water_cond"] * 10           # S/m -> mS/cm
     temp = sci["sci_water_temp"]
 
-    gps_epoch = np.array([g.timestamp() for g in gps_t])
-    sci_epoch = np.array([s.timestamp() for s in sci["t_dt"]])
+    gps_epoch = _dt64_to_epoch(gps_t)
+    sci_epoch = _dt64_to_epoch(sci["t_dt"])
     lat = np.interp(sci_epoch, gps_epoch, gps_lat)
     lon = np.interp(sci_epoch, gps_epoch, gps_lon)
 
@@ -87,11 +92,8 @@ def make_ctd(sci):
     return {k: sci[k][mask] for k in ("t_dt", "depth", "temp", "SP", "SA", "rho")}
 
 
-def fetch_bathymetry(lon_min, lon_max, lat_min, lat_max, pad=0.1):
-    """Fetch ETOPO2022 bathymetry via OPeNDAP for a region."""
-    lon_min, lon_max = lon_min - pad, lon_max + pad
-    lat_min, lat_max = lat_min - pad, lat_max + pad
-
+def _fetch_bathymetry_remote(lon_min, lon_max, lat_min, lat_max):
+    """Fetch ETOPO2022 bathymetry via OPeNDAP for already-padded bounds."""
     url = ("https://www.ngdc.noaa.gov/thredds/dodsC/global/"
            "ETOPO2022/60s/60s_bed_elev_netcdf/ETOPO_2022_v1_60s_N90W180_bed.nc")
     ds = nc.Dataset(url)
@@ -104,6 +106,58 @@ def fetch_bathymetry(lon_min, lon_max, lat_min, lat_max, pad=0.1):
     bathy_z = ds["z"][lat_ix.min():lat_ix.max()+1, lon_ix.min():lon_ix.max()+1]
     ds.close()
     return bathy_lon, bathy_lat, bathy_z
+
+
+def fetch_bathymetry(lon_min, lon_max, lat_min, lat_max, pad=0.1,
+                     cache_dir="."):
+    """Fetch ETOPO2022 bathymetry, caching locally with ±0.2° margin.
+
+    If the cache exists but doesn't cover the requested region, it is
+    extended (union of old and new bounds) rather than replaced.
+    """
+    margin = 0.2
+    req_lon_min, req_lon_max = lon_min - pad, lon_max + pad
+    req_lat_min, req_lat_max = lat_min - pad, lat_max + pad
+
+    cache_path = os.path.join(cache_dir, ".bathy_cache.pkl")
+
+    if os.path.exists(cache_path):
+        with open(cache_path, "rb") as f:
+            cached = pickle.load(f)
+        c_lon_min, c_lon_max = cached["lon"].min(), cached["lon"].max()
+        c_lat_min, c_lat_max = cached["lat"].min(), cached["lat"].max()
+
+        if (c_lon_min <= req_lon_min and c_lon_max >= req_lon_max
+                and c_lat_min <= req_lat_min and c_lat_max >= req_lat_max):
+            # Cache covers the request — return subset
+            lon_ix = ((cached["lon"] >= req_lon_min)
+                      & (cached["lon"] <= req_lon_max))
+            lat_ix = ((cached["lat"] >= req_lat_min)
+                      & (cached["lat"] <= req_lat_max))
+            return (cached["lon"][lon_ix], cached["lat"][lat_ix],
+                    cached["z"][np.ix_(lat_ix, lon_ix)])
+
+        # Expand to union of cache and request + margin
+        fetch_lon_min = min(c_lon_min, req_lon_min - margin)
+        fetch_lon_max = max(c_lon_max, req_lon_max + margin)
+        fetch_lat_min = min(c_lat_min, req_lat_min - margin)
+        fetch_lat_max = max(c_lat_max, req_lat_max + margin)
+    else:
+        fetch_lon_min = req_lon_min - margin
+        fetch_lon_max = req_lon_max + margin
+        fetch_lat_min = req_lat_min - margin
+        fetch_lat_max = req_lat_max + margin
+
+    blon, blat, bz = _fetch_bathymetry_remote(
+        fetch_lon_min, fetch_lon_max, fetch_lat_min, fetch_lat_max)
+
+    os.makedirs(cache_dir, exist_ok=True)
+    with open(cache_path, "wb") as f:
+        pickle.dump({"lon": blon, "lat": blat, "z": bz}, f)
+
+    lon_ix = (blon >= req_lon_min) & (blon <= req_lon_max)
+    lat_ix = (blat >= req_lat_min) & (blat <= req_lat_max)
+    return blon[lon_ix], blat[lat_ix], bz[np.ix_(lat_ix, lon_ix)]
 
 
 def colored_line(ax, fig, t_dt, y, z, cmap, clabel, vmin=None, vmax=None,
@@ -162,11 +216,14 @@ def generate_figures(glider, basedir):
     """Generate diagnostic figures for a single glider."""
     print(f"Processing {glider}...")
 
-    # --- Load data ---
-    flt = load_nc(os.path.join(basedir, f"{glider}.flt.nc"), "m_present_time")
-    sci = load_nc(os.path.join(basedir, f"{glider}.sci.nc"), "sci_m_present_time")
-    fltFull = load_nc(os.path.join(basedir, f"{glider}.fltFull.nc"), "m_present_time")
-    sciFull = load_nc(os.path.join(basedir, f"{glider}.sciFull.nc"), "sci_m_present_time")
+    # --- Load data (parallel I/O) ---
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        f_flt = executor.submit(load_nc, os.path.join(basedir, f"{glider}.flt.nc"), "m_present_time")
+        f_sci = executor.submit(load_nc, os.path.join(basedir, f"{glider}.sci.nc"), "sci_m_present_time")
+        f_fltFull = executor.submit(load_nc, os.path.join(basedir, f"{glider}.fltFull.nc"), "m_present_time")
+        f_sciFull = executor.submit(load_nc, os.path.join(basedir, f"{glider}.sciFull.nc"), "sci_m_present_time")
+    flt, sci = f_flt.result(), f_sci.result()
+    fltFull, sciFull = f_fltFull.result(), f_sciFull.result()
 
     # Mission start time (MRI times are ms since mission start)
     mission_start = flt["m_present_time"][0] - flt["m_present_secs_into_mission"][0]
@@ -266,6 +323,9 @@ def generate_figures(glider, basedir):
         ax.sharey(axes[0, 0])
 
     # (2,0) Geographic track with coastline and bathymetry
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+
     # Replace the plain axes with a cartopy GeoAxes
     pos = axes[2, 0].get_position()
     axes[2, 0].remove()
@@ -279,6 +339,7 @@ def generate_figures(glider, basedir):
     try:
         blon, blat, bz = fetch_bathymetry(
             track_lon.min(), track_lon.max(), track_lat.min(), track_lat.max(),
+            cache_dir=basedir,
         )
         blevels = np.arange(np.floor(bz.min() / 100) * 100, 1, 100)
         ax.contourf(blon, blat, bz, levels=blevels, cmap=cmocean.cm.deep_r,
@@ -350,9 +411,7 @@ def generate_figures(glider, basedir):
 
     # MRI times are milliseconds since mission start — convert to POSIX then datetime
     mri_posix = mission_start + mri_time_ms / 1000.0
-    mri_t = np.array(
-        [datetime.fromtimestamp(ts, tz=timezone.utc) for ts in mri_posix],
-    )
+    mri_t = (mri_posix * 1e6).astype("datetime64[us]")
 
     fig = plt.figure(figsize=(16, 10))
     fig.suptitle(f"{glider} — Turbulence Diagnostics", fontsize=14, fontweight="bold")
@@ -363,7 +422,7 @@ def generate_figures(glider, basedir):
     max_gap_s = np.median(dt_ms[dt_ms > 0]) / 1000.0 * 3
 
     # Identify surface gaps and split into profile segments
-    mri_epoch = np.array([t.timestamp() for t in mri_t])
+    mri_epoch = _dt64_to_epoch(mri_t)
     dt_s = np.diff(mri_epoch)
     gap_thresh = np.median(dt_s[dt_s > 0]) * 3  # same logic as max_gap_s
     gap_ix = np.where(dt_s > gap_thresh)[0] + 1
@@ -418,10 +477,10 @@ def generate_figures(glider, basedir):
                  label=r"$\log_{10}(\epsilon_1)$" if s == 0 else None)
         ax3.plot(mri_t[sl], mri_e2[sl], ".-", markersize=3, color="tab:orange",
                  label=r"$\log_{10}(\epsilon_2)$" if s == 0 else None)
-        ax3.plot(mri_t[sl], median_filter(mri_e1[sl], size=3), "--",
+        ax3.plot(mri_t[sl], mri_e1_med[sl], "--",
                  color="tab:blue", linewidth=1.5,
                  label=r"$\log_{10}(\epsilon_1)$ median" if s == 0 else None)
-        ax3.plot(mri_t[sl], median_filter(mri_e2[sl], size=3), "--",
+        ax3.plot(mri_t[sl], mri_e2_med[sl], "--",
                  color="tab:orange", linewidth=1.5,
                  label=r"$\log_{10}(\epsilon_2)$ median" if s == 0 else None)
 
@@ -685,7 +744,7 @@ def generate_figures(glider, basedir):
     ctd_rho4 = merged["rho"][ctd_order]
 
     # Detect profile boundaries via time gaps
-    ctd_epoch4 = np.array([t.timestamp() for t in ctd_t4])
+    ctd_epoch4 = _dt64_to_epoch(ctd_t4)
     ctd_dt4 = np.diff(ctd_epoch4)
     ctd_gap4 = np.median(ctd_dt4[ctd_dt4 > 0]) * 3
     ctd_gix4 = np.where(ctd_dt4 > ctd_gap4)[0] + 1
