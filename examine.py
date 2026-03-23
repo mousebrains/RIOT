@@ -212,8 +212,13 @@ def colored_line(ax, fig, t_dt, y, z, cmap, clabel, vmin=None, vmax=None,
     return lc
 
 
-def generate_figures(glider, basedir):
-    """Generate diagnostic figures for a single glider."""
+def generate_figures(glider, basedir, figures=None):
+    """Generate diagnostic figures for a single glider.
+
+    figures: set of figure numbers to generate (1-4), or None for all.
+    """
+    if figures is None:
+        figures = {1, 2, 3, 4}
     print(f"Processing {glider}...")
 
     # --- Load data (parallel I/O) ---
@@ -283,101 +288,106 @@ def generate_figures(glider, basedir):
     # =========================================================
     # Figure 1: CTD & Flight — 3x2 grid
     # =========================================================
-    fig, axes = plt.subplots(3, 2, figsize=(16, 10), constrained_layout=True)
-    fig.suptitle(f"{glider} — CTD & Flight Diagnostics", fontsize=14, fontweight="bold")
+    if 1 in figures:
+        fig, axes = plt.subplots(3, 2, figsize=(16, 10), constrained_layout=True)
+        fig.suptitle(f"{glider} — CTD & Flight Diagnostics", fontsize=14, fontweight="bold")
 
-    # (0,0) Temperature
-    ax = axes[0, 0]
-    colored_line(ax, fig, merged["t_dt"], merged["depth"], merged["temp"],
-                 "viridis", "Temperature (C)")
-    ax.set_xlabel("Time (UTC)")
-    ax.set_ylabel("Depth (m)")
+        # (0,0) Temperature
+        ax = axes[0, 0]
+        colored_line(ax, fig, merged["t_dt"], merged["depth"], merged["temp"],
+                     "viridis", "Temperature (C)")
+        ax.set_xlabel("Time (UTC)")
+        ax.set_ylabel("Depth (m)")
 
-    # (0,1) Salinity
-    ax = axes[0, 1]
-    colored_line(ax, fig, merged["t_dt"], merged["depth"], merged["SP"],
-                 "viridis_r", "Salinity (PSU)")
-    ax.set_xlabel("Time (UTC)")
-    ax.set_ylabel("Depth (m)")
+        # (0,1) Salinity
+        ax = axes[0, 1]
+        colored_line(ax, fig, merged["t_dt"], merged["depth"], merged["SP"],
+                     "viridis_r", "Salinity (PSU)")
+        ax.set_xlabel("Time (UTC)")
+        ax.set_ylabel("Depth (m)")
 
-    # (1,0) Density
-    ax = axes[1, 0]
-    colored_line(ax, fig, merged["t_dt"], merged["depth"], merged["rho"],
-                 "viridis_r", "Density (kg/m$^3$)")
-    ax.set_xlabel("Time (UTC)")
-    ax.set_ylabel("Depth (m)")
+        # (1,0) Density
+        ax = axes[1, 0]
+        colored_line(ax, fig, merged["t_dt"], merged["depth"], merged["rho"],
+                     "viridis_r", "Density (kg/m$^3$)")
+        ax.set_xlabel("Time (UTC)")
+        ax.set_ylabel("Depth (m)")
 
-    # (1,1) Depth + water depth
-    ax = axes[1, 1]
-    ax.plot(d_t, d_depth, "-", label="Glider depth")
-    ax.plot(wd_t, wd_depth, "o", markersize=3, label="Water depth")
-    ax.invert_yaxis()
-    ax.grid(True)
-    ax.set_xlabel("Time (UTC)")
-    ax.set_ylabel("Depth (m)")
-    ax.legend(fontsize=8)
+        # (1,1) Depth + water depth
+        ax = axes[1, 1]
+        ax.plot(d_t, d_depth, "-", label="Glider depth")
+        ax.plot(wd_t, wd_depth, "o", markersize=3, label="Water depth")
+        ax.invert_yaxis()
+        ax.grid(True)
+        ax.set_xlabel("Time (UTC)")
+        ax.set_ylabel("Depth (m)")
+        ax.legend(fontsize=8)
 
-    # Link x and y axes on the top four panels
-    for ax in (axes[0, 1], axes[1, 0], axes[1, 1]):
-        ax.sharex(axes[0, 0])
-        ax.sharey(axes[0, 0])
+        # Link x and y axes on the top four panels
+        for ax in (axes[0, 1], axes[1, 0], axes[1, 1]):
+            ax.sharex(axes[0, 0])
+            ax.sharey(axes[0, 0])
 
-    # (2,0) Geographic track with coastline and bathymetry
-    import cartopy.crs as ccrs
-    import cartopy.feature as cfeature
+        # (2,0) Geographic track with coastline and bathymetry
+        import cartopy.crs as ccrs
+        import cartopy.feature as cfeature
 
-    # Replace the plain axes with a cartopy GeoAxes
-    pos = axes[2, 0].get_position()
-    axes[2, 0].remove()
-    ax = fig.add_axes(pos, projection=ccrs.PlateCarree())
+        # Replace the plain axes with a cartopy GeoAxes
+        pos = axes[2, 0].get_position()
+        axes[2, 0].remove()
+        ax = fig.add_axes(pos, projection=ccrs.PlateCarree())
 
-    sci_mask = np.isfinite(sci["lon"]) & np.isfinite(sci["lat"])
-    track_lon = sci["lon"][sci_mask]
-    track_lat = sci["lat"][sci_mask]
+        sci_mask = np.isfinite(sci["lon"]) & np.isfinite(sci["lat"])
+        track_lon = sci["lon"][sci_mask]
+        track_lat = sci["lat"][sci_mask]
 
-    # Fetch and plot bathymetry
-    try:
-        blon, blat, bz = fetch_bathymetry(
-            track_lon.min(), track_lon.max(), track_lat.min(), track_lat.max(),
-            cache_dir=basedir,
-        )
-        blevels = np.arange(np.floor(bz.min() / 100) * 100, 1, 100)
-        ax.contourf(blon, blat, bz, levels=blevels, cmap=cmocean.cm.deep_r,
-                    transform=ccrs.PlateCarree())
-        ax.contour(blon, blat, bz, levels=blevels, colors="0.5", linewidths=0.3,
-                   transform=ccrs.PlateCarree())
-    except Exception as e:
-        print(f"  Warning: could not fetch bathymetry: {e}")
+        # Fetch and plot bathymetry
+        try:
+            blon, blat, bz = fetch_bathymetry(
+                track_lon.min(), track_lon.max(), track_lat.min(), track_lat.max(),
+                cache_dir=basedir,
+            )
+            blevels = np.arange(np.floor(bz.min() / 100) * 100, 1, 100)
+            ax.contourf(blon, blat, bz, levels=blevels, cmap=cmocean.cm.deep_r,
+                        transform=ccrs.PlateCarree())
+            ax.contour(blon, blat, bz, levels=blevels, colors="0.5", linewidths=0.3,
+                       transform=ccrs.PlateCarree())
+        except Exception as e:
+            print(f"  Warning: could not fetch bathymetry: {e}")
 
-    ax.plot(track_lon, track_lat, "-", color="red", linewidth=1.5,
-            transform=ccrs.PlateCarree())
-    ax.add_feature(cfeature.LAND, facecolor="tan")
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
-    gl = ax.gridlines(draw_labels=True, linewidth=0.5, alpha=0.5)
-    gl.top_labels = False
-    gl.right_labels = False
-    ax.set_xlabel("Longitude (deg East)")
-    ax.set_ylabel("Latitude (deg North)")
+        ax.plot(track_lon, track_lat, "-", color="red", linewidth=1.5,
+                transform=ccrs.PlateCarree())
+        ax.add_feature(cfeature.LAND, facecolor="tan")
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
+        gl = ax.gridlines(draw_labels=True, linewidth=0.5, alpha=0.5)
+        gl.top_labels = False
+        gl.right_labels = False
+        ax.set_xlabel("Longitude (deg East)")
+        ax.set_ylabel("Latitude (deg North)")
 
-    # (2,1) Pitch & Roll histograms (stacked)
-    ax_top = axes[2, 1]
-    ax_top.hist(pitch_deg, bins=100)
-    ax_top.grid(True)
-    ax_top.set_xlabel("Pitch (deg)")
-    ax_top.set_ylabel("Count")
-    # Add roll as inset below pitch by using a twin-x with offset
-    ax_bot = ax_top.inset_axes([0, -1.1, 1, 0.9])
-    ax_bot.hist(roll_deg, bins=100, color="tab:orange")
-    ax_bot.grid(True)
-    ax_bot.set_xlabel("Roll (deg)")
-    ax_bot.set_ylabel("Count")
+        # (2,1) Pitch & Roll histograms (stacked)
+        ax_top = axes[2, 1]
+        ax_top.hist(pitch_deg, bins=100)
+        ax_top.grid(True)
+        ax_top.set_xlabel("Pitch (deg)")
+        ax_top.set_ylabel("Count")
+        # Add roll as inset below pitch by using a twin-x with offset
+        ax_bot = ax_top.inset_axes([0, -1.1, 1, 0.9])
+        ax_bot.hist(roll_deg, bins=100, color="tab:orange")
+        ax_bot.grid(True)
+        ax_bot.set_xlabel("Roll (deg)")
+        ax_bot.set_ylabel("Count")
 
     # =========================================================
     # Figure 2: MRI/Turbulence — 2 rows (top: e1, e2 side-by-side; bottom: timeseries spanning both)
     # =========================================================
     mri_fn = os.path.join(basedir, f"{glider}.mri.nc")
+    need_mri = figures & {2, 3, 4}
+    if not need_mri:
+        plt.show()
+        return
     if not os.path.exists(mri_fn):
-        print(f"  No MRI file for {glider}, skipping turbulence figure")
+        print(f"  No MRI file for {glider}, skipping turbulence figures")
         plt.show()
         return
 
@@ -413,10 +423,6 @@ def generate_figures(glider, basedir):
     mri_posix = mission_start + mri_time_ms / 1000.0
     mri_t = (mri_posix * 1e6).astype("datetime64[us]")
 
-    fig = plt.figure(figsize=(16, 10))
-    fig.suptitle(f"{glider} — Turbulence Diagnostics", fontsize=14, fontweight="bold")
-    gs = fig.add_gridspec(2, 2, height_ratios=[1.2, 1], hspace=0.3, wspace=0.3)
-
     # Estimate max gap: median time step * 3 to detect downcast gaps
     dt_ms = np.diff(np.sort(mri_time_ms))
     max_gap_s = np.median(dt_ms[dt_ms > 0]) / 1000.0 * 3
@@ -444,74 +450,79 @@ def generate_figures(glider, basedir):
     eps_vmax = np.nanquantile(all_eps, 0.95)
     eps_norm = plt.Normalize(eps_vmin, eps_vmax)
 
-    # Top-left: Epsilon_1 median vs pressure
-    ax1 = fig.add_subplot(gs[0, 0])
-    lc1 = colored_line(ax1, fig, mri_t, mri_pressure, mri_e1_med, "viridis",
-                        None, norm=eps_norm, max_gap_s=max_gap_s, colorbar=False)
-    ax1.set_xlabel("Time (UTC)")
-    ax1.set_ylabel("Pressure (dbar)")
-    ax1.set_title(r"$\epsilon_1$ median")
+    if 2 in figures:
+        fig2 = plt.figure(figsize=(16, 10))
+        fig2.suptitle(f"{glider} — Turbulence Diagnostics", fontsize=14, fontweight="bold")
+        gs = fig2.add_gridspec(2, 2, height_ratios=[1.2, 1], hspace=0.3, wspace=0.3)
 
-    # Top-right: Epsilon_2 median vs pressure
-    ax2 = fig.add_subplot(gs[0, 1])
-    lc2 = colored_line(ax2, fig, mri_t, mri_pressure, mri_e2_med, "viridis",
-                        None, norm=eps_norm, max_gap_s=max_gap_s, colorbar=False)
-    ax2.set_xlabel("Time (UTC)")
-    ax2.set_ylabel("Pressure (dbar)")
-    ax2.set_title(r"$\epsilon_2$ median")
+        # Top-left: Epsilon_1 median vs pressure
+        ax1 = fig2.add_subplot(gs[0, 0])
+        lc1 = colored_line(ax1, fig2, mri_t, mri_pressure, mri_e1_med, "viridis",
+                            None, norm=eps_norm, max_gap_s=max_gap_s, colorbar=False)
+        ax1.set_xlabel("Time (UTC)")
+        ax1.set_ylabel("Pressure (dbar)")
+        ax1.set_title(r"$\epsilon_1$ median")
 
-    # Link axes on the two epsilon panels
-    ax2.sharex(ax1)
-    ax2.sharey(ax1)
+        # Top-right: Epsilon_2 median vs pressure
+        ax2 = fig2.add_subplot(gs[0, 1])
+        lc2 = colored_line(ax2, fig2, mri_t, mri_pressure, mri_e2_med, "viridis",
+                            None, norm=eps_norm, max_gap_s=max_gap_s, colorbar=False)
+        ax2.set_xlabel("Time (UTC)")
+        ax2.set_ylabel("Pressure (dbar)")
+        ax2.set_title(r"$\epsilon_2$ median")
 
-    # Joint colorbar for both epsilon panels
-    cb = fig.colorbar(lc1, ax=[ax1, ax2], location="right", shrink=0.8)
-    cb.set_label(r"$\log_{10}(\epsilon)$ median (W/kg)")
+        # Link axes on the two epsilon panels
+        ax2.sharex(ax1)
+        ax2.sharey(ax1)
 
-    # Bottom: Epsilon time series (spanning both columns), breaking at surface gaps
-    ax3 = fig.add_subplot(gs[1, :])
+        # Joint colorbar for both epsilon panels
+        cb = fig2.colorbar(lc1, ax=[ax1, ax2], location="right", shrink=0.8)
+        cb.set_label(r"$\log_{10}(\epsilon)$ median (W/kg)")
 
-    for s, e in zip(profile_starts, profile_ends):
-        sl = slice(s, e)
-        ax3.plot(mri_t[sl], mri_e1[sl], ".-", markersize=3, color="tab:blue",
-                 label=r"$\log_{10}(\epsilon_1)$" if s == 0 else None)
-        ax3.plot(mri_t[sl], mri_e2[sl], ".-", markersize=3, color="tab:orange",
-                 label=r"$\log_{10}(\epsilon_2)$" if s == 0 else None)
-        ax3.plot(mri_t[sl], mri_e1_med[sl], "--",
-                 color="tab:blue", linewidth=1.5,
-                 label=r"$\log_{10}(\epsilon_1)$ median" if s == 0 else None)
-        ax3.plot(mri_t[sl], mri_e2_med[sl], "--",
-                 color="tab:orange", linewidth=1.5,
-                 label=r"$\log_{10}(\epsilon_2)$ median" if s == 0 else None)
+        # Bottom: Epsilon time series (spanning both columns), breaking at surface gaps
+        ax3 = fig2.add_subplot(gs[1, :])
 
-    ax3.grid(True)
-    ax3.set_xlabel("Time (UTC)")
-    ax3.set_ylabel(r"$\log_{10}(\epsilon)$ (W/kg)")
-    ax3.legend(loc="upper left")
+        for s, e in zip(profile_starts, profile_ends):
+            sl = slice(s, e)
+            ax3.plot(mri_t[sl], mri_e1[sl], ".-", markersize=3, color="tab:blue",
+                     label=r"$\log_{10}(\epsilon_1)$" if s == 0 else None)
+            ax3.plot(mri_t[sl], mri_e2[sl], ".-", markersize=3, color="tab:orange",
+                     label=r"$\log_{10}(\epsilon_2)$" if s == 0 else None)
+            ax3.plot(mri_t[sl], mri_e1_med[sl], "--",
+                     color="tab:blue", linewidth=1.5,
+                     label=r"$\log_{10}(\epsilon_1)$ median" if s == 0 else None)
+            ax3.plot(mri_t[sl], mri_e2_med[sl], "--",
+                     color="tab:orange", linewidth=1.5,
+                     label=r"$\log_{10}(\epsilon_2)$ median" if s == 0 else None)
 
-    # Detect anomalous spikes and compute their periodicity
-    spike_parts = []
-    for name, eps in [(r"$\epsilon_1$", mri_e1), (r"$\epsilon_2$", mri_e2)]:
-        peaks, _ = find_peaks(eps, prominence=5, distance=3)
-        if len(peaks) > 1:
-            peak_times = mri_epoch[peaks]
-            dt_peaks = np.diff(peak_times)
-            # Keep only within-profile intervals; surface gaps are typically
-            # > 500s while spike intervals are ~100-300s
-            dt_intra = dt_peaks[dt_peaks < 500]
-            if len(dt_intra) > 0:
-                mean_s = np.mean(dt_intra)
-                std_s = np.std(dt_intra)
-                spike_parts.append(
-                    f"{name}: {mean_s:.0f} \u00b1 {std_s:.0f} s (n={len(dt_intra)})"
-                )
-    if spike_parts:
-        ax3.set_title("Spike interval:  " + ",   ".join(spike_parts), fontsize=10)
+        ax3.grid(True)
+        ax3.set_xlabel("Time (UTC)")
+        ax3.set_ylabel(r"$\log_{10}(\epsilon)$ (W/kg)")
+        ax3.legend(loc="upper left")
 
-    for ax in (ax1, ax2, ax3):
-        for label in ax.get_xticklabels():
-            label.set_rotation(30)
-            label.set_ha("right")
+        # Detect anomalous spikes and compute their periodicity
+        spike_parts = []
+        for name, eps in [(r"$\epsilon_1$", mri_e1), (r"$\epsilon_2$", mri_e2)]:
+            peaks, _ = find_peaks(eps, prominence=5, distance=3)
+            if len(peaks) > 1:
+                peak_times = mri_epoch[peaks]
+                dt_peaks = np.diff(peak_times)
+                # Keep only within-profile intervals; surface gaps are typically
+                # > 500s while spike intervals are ~100-300s
+                dt_intra = dt_peaks[dt_peaks < 500]
+                if len(dt_intra) > 0:
+                    mean_s = np.mean(dt_intra)
+                    std_s = np.std(dt_intra)
+                    spike_parts.append(
+                        f"{name}: {mean_s:.0f} \u00b1 {std_s:.0f} s (n={len(dt_intra)})"
+                    )
+        if spike_parts:
+            ax3.set_title("Spike interval:  " + ",   ".join(spike_parts), fontsize=10)
+
+        for ax in (ax1, ax2, ax3):
+            for label in ax.get_xticklabels():
+                label.set_rotation(30)
+                label.set_ha("right")
 
     # =========================================================
     # Figure 3: Profile Walker — interactive profile-by-profile viewer
@@ -540,285 +551,292 @@ def generate_figures(glider, basedir):
         })
     n_prof = len(prof_data)
 
-    if n_prof == 0:
-        print(f"  No MRI profiles detected for {glider}, skipping profile walker")
-        plt.show()
-        return
-
-    fig3 = plt.figure(figsize=(16, 10))
-    fig3.suptitle(f"{glider} \u2014 Profile Walker  [1/{n_prof}]",
-                  fontsize=14, fontweight="bold")
-    gs3 = fig3.add_gridspec(2, 2, height_ratios=[1, 1.2],
-                            hspace=0.35, wspace=0.3)
-
-    # --- Top panels: ε₁ and ε₂ vs depth, colored by epsilon ---
-    ax_top1 = fig3.add_subplot(gs3[0, 0])
-    lc3_1 = colored_line(ax_top1, fig3, mri_t, mri_depth, mri_e1_med, "viridis",
-                         None, norm=eps_norm, max_gap_s=max_gap_s, colorbar=False)
-    ax_top1.set_xlabel("Time (UTC)")
-    ax_top1.set_ylabel("Depth (m)")
-    ax_top1.set_title(r"$\epsilon_1$ median")
-
-    ax_top2 = fig3.add_subplot(gs3[0, 1])
-    lc3_2 = colored_line(ax_top2, fig3, mri_t, mri_depth, mri_e2_med, "viridis",
-                         None, norm=eps_norm, max_gap_s=max_gap_s, colorbar=False)
-    ax_top2.set_xlabel("Time (UTC)")
-    ax_top2.set_ylabel("Depth (m)")
-    ax_top2.set_title(r"$\epsilon_2$ median")
-
-    # Link top panel time and depth axes
-    ax_top2.sharex(ax_top1)
-    ax_top2.sharey(ax_top1)
-
-    # Joint colorbar for top panels
-    if lc3_1 is not None:
-        fig3.colorbar(lc3_1, ax=[ax_top1, ax_top2], location="right",
-                      shrink=0.8).set_label(r"$\log_{10}(\epsilon)$ median (W/kg)")
-
-    # --- Bottom panel: multi-x-axis profile view ---
-    ax_bt = fig3.add_subplot(gs3[1, :])
-    ax_bt.sharey(ax_top1)  # link depth axis with top panels
-    ax_bt.set_ylabel("Depth (m)")
-    ax_bt.set_xlabel("Temperature (\u00b0C)", color="tab:red")
-    ax_bt.tick_params(axis="x", labelcolor="tab:red")
-    ax_bt.grid(True, alpha=0.3)
-
-    ax_bs = ax_bt.twiny()  # salinity x-axis (top)
-    ax_bs.set_xlabel("Salinity (PSU)", color="tab:green")
-    ax_bs.tick_params(axis="x", labelcolor="tab:green")
-
-    ax_be = ax_bt.twiny()  # epsilon x-axis (offset to bottom)
-    ax_be.xaxis.set_ticks_position("bottom")
-    ax_be.xaxis.set_label_position("bottom")
-    ax_be.spines["bottom"].set_position(("outward", 45))
-    ax_be.set_xlabel(r"$\log_{10}(\epsilon)$ (W/kg)", color="tab:blue")
-    ax_be.tick_params(axis="x", labelcolor="tab:blue")
-
-    # Static epsilon legend (independent of line objects)
-    ax_be.legend(handles=[
-        Line2D([0], [0], color="tab:blue", marker="o", ls="none",
-               label=r"$\log_{10}(\epsilon_1)$"),
-        Line2D([0], [0], color="tab:orange", marker="s", ls="none",
-               label=r"$\log_{10}(\epsilon_2)$"),
-    ], loc="lower right", fontsize=8)
-
-    # --- Interactive state & update logic ---
-    _st = dict(idx=0, playing=False, timer=None,
-               span1=None, span2=None, lines=[], updating=False)
-
-    def _update(idx):
-        if _st["updating"]:
-            return
-        _st["updating"] = True
-        idx = max(0, min(idx, n_prof - 1))
-        _st["idx"] = idx
-        p = prof_data[idx]
-        fig3.suptitle(f"{glider} \u2014 Profile Walker  [{idx + 1}/{n_prof}]",
-                      fontsize=14, fontweight="bold")
-
-        # Update highlight spans on top panels
-        for key in ("span1", "span2"):
-            if _st[key] is not None:
-                _st[key].remove()
-        ts = mdates.date2num(p["t_start"])
-        te = mdates.date2num(p["t_end"])
-        _st["span1"] = ax_top1.axvspan(ts, te, alpha=0.3, color="yellow", zorder=0)
-        _st["span2"] = ax_top2.axvspan(ts, te, alpha=0.3, color="yellow", zorder=0)
-
-        # Clear previous profile lines
-        for ln in _st["lines"]:
-            ln.remove()
-        _st["lines"] = []
-
-        # Temperature
-        if len(p["temp"]) > 0:
-            ln, = ax_bt.plot(p["temp"], p["ctd_depth"], "-o",
-                             color="tab:red", ms=3, lw=1.5)
-            _st["lines"].append(ln)
-            rng = (p["temp"].max() - p["temp"].min()) * 0.05 or 0.1
-            ax_bt.set_xlim(p["temp"].min() - rng, p["temp"].max() + rng)
+    if 3 in figures:
+        if n_prof == 0:
+            print(f"  No MRI profiles detected for {glider}, skipping profile walker")
         else:
-            ax_bt.set_xlim(0, 1)
+            fig3 = plt.figure(figsize=(16, 10))
+            fig3.suptitle(f"{glider} \u2014 Profile Walker  [1/{n_prof}]",
+                          fontsize=14, fontweight="bold")
+            gs3 = fig3.add_gridspec(2, 2, height_ratios=[1, 1.2],
+                                    hspace=0.35, wspace=0.3)
 
-        # Salinity
-        if len(p["SP"]) > 0:
-            ln, = ax_bs.plot(p["SP"], p["ctd_depth"], "-s",
-                             color="tab:green", ms=3, lw=1.5)
-            _st["lines"].append(ln)
-            rng = (p["SP"].max() - p["SP"].min()) * 0.05 or 0.01
-            ax_bs.set_xlim(p["SP"].min() - rng, p["SP"].max() + rng)
-        else:
-            ax_bs.set_xlim(0, 1)
+            # --- Top panels: ε₁ and ε₂ vs depth, colored by epsilon ---
+            ax_top1 = fig3.add_subplot(gs3[0, 0])
+            lc3_1 = colored_line(ax_top1, fig3, mri_t, mri_depth, mri_e1_med, "viridis",
+                                 None, norm=eps_norm, max_gap_s=max_gap_s, colorbar=False)
+            ax_top1.set_xlabel("Time (UTC)")
+            ax_top1.set_ylabel("Depth (m)")
+            ax_top1.set_title(r"$\epsilon_1$ median")
 
-        # Epsilon (both ε₁ and ε₂) — markers only
-        if len(p["e1"]) > 0:
-            l1, = ax_be.plot(p["e1"], p["depth"], "o",
-                             color="tab:blue", ms=4)
-            l2, = ax_be.plot(p["e2"], p["depth"], "s",
-                             color="tab:orange", ms=4)
-            _st["lines"].extend([l1, l2])
-            ae = np.concatenate([p["e1"], p["e2"]])
-            ae = ae[np.isfinite(ae)]
-            if len(ae) > 0:
-                rng = (ae.max() - ae.min()) * 0.05 or 0.1
-                ax_be.set_xlim(ae.min() - rng, ae.max() + rng)
-        else:
-            ax_be.set_xlim(-12, -6)
+            ax_top2 = fig3.add_subplot(gs3[0, 1])
+            lc3_2 = colored_line(ax_top2, fig3, mri_t, mri_depth, mri_e2_med, "viridis",
+                                 None, norm=eps_norm, max_gap_s=max_gap_s, colorbar=False)
+            ax_top2.set_xlabel("Time (UTC)")
+            ax_top2.set_ylabel("Depth (m)")
+            ax_top2.set_title(r"$\epsilon_2$ median")
 
-        fig3.canvas.draw_idle()
-        _st["updating"] = False
+            # Link top panel time and depth axes
+            ax_top2.sharex(ax_top1)
+            ax_top2.sharey(ax_top1)
 
-    def _prev(event):
-        _update(_st["idx"] - 1)
+            # Joint colorbar for top panels
+            if lc3_1 is not None:
+                fig3.colorbar(lc3_1, ax=[ax_top1, ax_top2], location="right",
+                              shrink=0.8).set_label(r"$\log_{10}(\epsilon)$ median (W/kg)")
 
-    def _next(event):
-        _update(_st["idx"] + 1)
+            # --- Bottom panel: multi-x-axis profile view ---
+            ax_bt = fig3.add_subplot(gs3[1, :])
+            ax_bt.sharey(ax_top1)  # link depth axis with top panels
+            ax_bt.set_ylabel("Depth (m)")
+            ax_bt.set_xlabel("Temperature (\u00b0C)", color="tab:red")
+            ax_bt.tick_params(axis="x", labelcolor="tab:red")
+            ax_bt.grid(True, alpha=0.3)
 
-    def _advance():
-        if _st["playing"] and _st["idx"] < n_prof - 1:
-            _update(_st["idx"] + 1)
-        else:
-            _st["playing"] = False
-            if _st["timer"]:
-                _st["timer"].stop()
-            btn_play.label.set_text("Play")
-            fig3.canvas.draw_idle()
+            ax_bs = ax_bt.twiny()  # salinity x-axis (top)
+            ax_bs.set_xlabel("Salinity (PSU)", color="tab:green")
+            ax_bs.tick_params(axis="x", labelcolor="tab:green")
 
-    def _play(event):
-        if _st["playing"]:
-            _st["playing"] = False
-            if _st["timer"]:
-                _st["timer"].stop()
-            btn_play.label.set_text("Play")
-            fig3.canvas.draw_idle()
-        else:
-            _st["playing"] = True
-            btn_play.label.set_text("Pause")
-            fig3.canvas.draw_idle()
-            _st["timer"] = fig3.canvas.new_timer(interval=1000)
-            _st["timer"].add_callback(_advance)
-            _st["timer"].start()
+            ax_be = ax_bt.twiny()  # epsilon x-axis (offset to bottom)
+            ax_be.xaxis.set_ticks_position("bottom")
+            ax_be.xaxis.set_label_position("bottom")
+            ax_be.spines["bottom"].set_position(("outward", 45))
+            ax_be.set_xlabel(r"$\log_{10}(\epsilon)$ (W/kg)", color="tab:blue")
+            ax_be.tick_params(axis="x", labelcolor="tab:blue")
 
-    def _on_xlim(ax):
-        """When a top panel is zoomed, jump to the first full profile in view."""
-        if _st["updating"]:
-            return
-        lo, hi = ax.get_xlim()
-        for i, p in enumerate(prof_data):
-            ts = mdates.date2num(p["t_start"])
-            te = mdates.date2num(p["t_end"])
-            if ts >= lo and te <= hi:
-                if i != _st["idx"]:
-                    _update(i)
-                return
+            # Static epsilon legend (independent of line objects)
+            ax_be.legend(handles=[
+                Line2D([0], [0], color="tab:blue", marker="o", ls="none",
+                       label=r"$\log_{10}(\epsilon_1)$"),
+                Line2D([0], [0], color="tab:orange", marker="s", ls="none",
+                       label=r"$\log_{10}(\epsilon_2)$"),
+            ], loc="lower right", fontsize=8)
 
-    ax_top1.callbacks.connect("xlim_changed", _on_xlim)
+            # --- Interactive state & update logic ---
+            _st = dict(idx=0, playing=False, timer=None,
+                       span1=None, span2=None, lines=[], updating=False)
 
-    # Navigation buttons (northeast corner)
-    btn_prev = Button(fig3.add_axes([0.62, 0.94, 0.08, 0.035]), "Previous")
-    btn_play = Button(fig3.add_axes([0.71, 0.94, 0.08, 0.035]), "Play")
-    btn_next = Button(fig3.add_axes([0.80, 0.94, 0.08, 0.035]), "Next")
-    btn_prev.on_clicked(_prev)
-    btn_play.on_clicked(_play)
-    btn_next.on_clicked(_next)
+            def _update(idx):
+                if _st["updating"]:
+                    return
+                _st["updating"] = True
+                idx = max(0, min(idx, n_prof - 1))
+                _st["idx"] = idx
+                p = prof_data[idx]
+                fig3.suptitle(f"{glider} \u2014 Profile Walker  [{idx + 1}/{n_prof}]",
+                              fontsize=14, fontweight="bold")
 
-    # Rotate top-panel tick labels
-    for ax in (ax_top1, ax_top2):
-        for label in ax.get_xticklabels():
-            label.set_rotation(30)
-            label.set_ha("right")
+                # Update highlight spans on top panels
+                for key in ("span1", "span2"):
+                    if _st[key] is not None:
+                        _st[key].remove()
+                ts = mdates.date2num(p["t_start"])
+                te = mdates.date2num(p["t_end"])
+                _st["span1"] = ax_top1.axvspan(ts, te, alpha=0.3, color="yellow", zorder=0)
+                _st["span2"] = ax_top2.axvspan(ts, te, alpha=0.3, color="yellow", zorder=0)
 
-    # Initialize with first profile
-    _update(0)
+                # Clear previous profile lines
+                for ln in _st["lines"]:
+                    ln.remove()
+                _st["lines"] = []
+
+                # Temperature
+                if len(p["temp"]) > 0:
+                    ln, = ax_bt.plot(p["temp"], p["ctd_depth"], "-o",
+                                     color="tab:red", ms=3, lw=1.5)
+                    _st["lines"].append(ln)
+                    rng = (p["temp"].max() - p["temp"].min()) * 0.05 or 0.1
+                    ax_bt.set_xlim(p["temp"].min() - rng, p["temp"].max() + rng)
+                else:
+                    ax_bt.set_xlim(0, 1)
+
+                # Salinity
+                if len(p["SP"]) > 0:
+                    ln, = ax_bs.plot(p["SP"], p["ctd_depth"], "-s",
+                                     color="tab:green", ms=3, lw=1.5)
+                    _st["lines"].append(ln)
+                    rng = (p["SP"].max() - p["SP"].min()) * 0.05 or 0.01
+                    ax_bs.set_xlim(p["SP"].min() - rng, p["SP"].max() + rng)
+                else:
+                    ax_bs.set_xlim(0, 1)
+
+                # Epsilon (both ε₁ and ε₂) — markers only
+                if len(p["e1"]) > 0:
+                    l1, = ax_be.plot(p["e1"], p["depth"], "o",
+                                     color="tab:blue", ms=4)
+                    l2, = ax_be.plot(p["e2"], p["depth"], "s",
+                                     color="tab:orange", ms=4)
+                    _st["lines"].extend([l1, l2])
+                    ae = np.concatenate([p["e1"], p["e2"]])
+                    ae = ae[np.isfinite(ae)]
+                    if len(ae) > 0:
+                        rng = (ae.max() - ae.min()) * 0.05 or 0.1
+                        ax_be.set_xlim(ae.min() - rng, ae.max() + rng)
+                else:
+                    ax_be.set_xlim(-12, -6)
+
+                fig3.canvas.draw_idle()
+                _st["updating"] = False
+
+            def _prev(event):
+                _update(_st["idx"] - 1)
+
+            def _next(event):
+                _update(_st["idx"] + 1)
+
+            def _advance():
+                if _st["playing"] and _st["idx"] < n_prof - 1:
+                    _update(_st["idx"] + 1)
+                else:
+                    _st["playing"] = False
+                    if _st["timer"]:
+                        _st["timer"].stop()
+                    btn_play.label.set_text("Play")
+                    fig3.canvas.draw_idle()
+
+            def _play(event):
+                if _st["playing"]:
+                    _st["playing"] = False
+                    if _st["timer"]:
+                        _st["timer"].stop()
+                    btn_play.label.set_text("Play")
+                    fig3.canvas.draw_idle()
+                else:
+                    _st["playing"] = True
+                    btn_play.label.set_text("Pause")
+                    fig3.canvas.draw_idle()
+                    _st["timer"] = fig3.canvas.new_timer(interval=1000)
+                    _st["timer"].add_callback(_advance)
+                    _st["timer"].start()
+
+            def _on_xlim(ax):
+                """When a top panel is zoomed, jump to the first full profile in view."""
+                if _st["updating"]:
+                    return
+                lo, hi = ax.get_xlim()
+                for i, p in enumerate(prof_data):
+                    ts = mdates.date2num(p["t_start"])
+                    te = mdates.date2num(p["t_end"])
+                    if ts >= lo and te <= hi:
+                        if i != _st["idx"]:
+                            _update(i)
+                        return
+
+            ax_top1.callbacks.connect("xlim_changed", _on_xlim)
+
+            # Navigation buttons (northeast corner)
+            btn_prev = Button(fig3.add_axes([0.62, 0.94, 0.08, 0.035]), "Previous")
+            btn_play = Button(fig3.add_axes([0.71, 0.94, 0.08, 0.035]), "Play")
+            btn_next = Button(fig3.add_axes([0.80, 0.94, 0.08, 0.035]), "Next")
+            btn_prev.on_clicked(_prev)
+            btn_play.on_clicked(_play)
+            btn_next.on_clicked(_next)
+
+            # Rotate top-panel tick labels
+            for ax in (ax_top1, ax_top2):
+                for label in ax.get_xticklabels():
+                    label.set_rotation(30)
+                    label.set_ha("right")
+
+            # Initialize with first profile
+            _update(0)
 
     # =========================================================
     # Figure 4: CTD Derivatives — dT/dz, dS/dz, dρ/dz
     # =========================================================
+    if 4 in figures:
+        # Sort merged CTD by time
+        ctd_order = np.argsort(merged["t_dt"])
+        ctd_t4 = merged["t_dt"][ctd_order]
+        ctd_depth4 = merged["depth"][ctd_order]
+        ctd_temp4 = merged["temp"][ctd_order]
+        ctd_SP4 = merged["SP"][ctd_order]
+        ctd_rho4 = merged["rho"][ctd_order]
 
-    # Sort merged CTD by time
-    ctd_order = np.argsort(merged["t_dt"])
-    ctd_t4 = merged["t_dt"][ctd_order]
-    ctd_depth4 = merged["depth"][ctd_order]
-    ctd_temp4 = merged["temp"][ctd_order]
-    ctd_SP4 = merged["SP"][ctd_order]
-    ctd_rho4 = merged["rho"][ctd_order]
+        # Detect profile boundaries via time gaps
+        ctd_epoch4 = _dt64_to_epoch(ctd_t4)
+        ctd_dt4 = np.diff(ctd_epoch4)
+        ctd_gap4 = np.median(ctd_dt4[ctd_dt4 > 0]) * 3
+        ctd_gix4 = np.where(ctd_dt4 > ctd_gap4)[0] + 1
+        ctd_ps4 = np.concatenate([[0], ctd_gix4])
+        ctd_pe4 = np.concatenate([ctd_gix4, [len(ctd_t4)]])
 
-    # Detect profile boundaries via time gaps
-    ctd_epoch4 = _dt64_to_epoch(ctd_t4)
-    ctd_dt4 = np.diff(ctd_epoch4)
-    ctd_gap4 = np.median(ctd_dt4[ctd_dt4 > 0]) * 3
-    ctd_gix4 = np.where(ctd_dt4 > ctd_gap4)[0] + 1
-    ctd_ps4 = np.concatenate([[0], ctd_gix4])
-    ctd_pe4 = np.concatenate([ctd_gix4, [len(ctd_t4)]])
+        # Compute per-meter derivatives within each profile
+        dt_list, dz_list = [], []
+        dTdz_list, dSdz_list, drhodz_list = [], [], []
 
-    # Compute per-meter derivatives within each profile
-    dt_list, dz_list = [], []
-    dTdz_list, dSdz_list, drhodz_list = [], [], []
+        for s, e in zip(ctd_ps4, ctd_pe4):
+            if e - s < 2:
+                continue
+            dz = np.diff(ctd_depth4[s:e])
+            ok = np.abs(dz) > 0.01  # need at least 1 cm depth change
+            mid_t = ctd_t4[s:e - 1]
+            mid_z = 0.5 * (ctd_depth4[s:e - 1] + ctd_depth4[s + 1:e])
+            safe_dz = np.where(ok, dz, np.nan)
+            dTdz = np.diff(ctd_temp4[s:e]) / safe_dz
+            dSdz = np.diff(ctd_SP4[s:e]) / safe_dz
+            drhodz = np.diff(ctd_rho4[s:e]) / safe_dz
+            dt_list.append(mid_t)
+            dz_list.append(mid_z)
+            dTdz_list.append(dTdz)
+            dSdz_list.append(dSdz)
+            drhodz_list.append(drhodz)
 
-    for s, e in zip(ctd_ps4, ctd_pe4):
-        if e - s < 2:
-            continue
-        dz = np.diff(ctd_depth4[s:e])
-        ok = np.abs(dz) > 0.01  # need at least 1 cm depth change
-        mid_t = ctd_t4[s:e - 1]
-        mid_z = 0.5 * (ctd_depth4[s:e - 1] + ctd_depth4[s + 1:e])
-        safe_dz = np.where(ok, dz, np.nan)
-        dTdz = np.diff(ctd_temp4[s:e]) / safe_dz
-        dSdz = np.diff(ctd_SP4[s:e]) / safe_dz
-        drhodz = np.diff(ctd_rho4[s:e]) / safe_dz
-        dt_list.append(mid_t)
-        dz_list.append(mid_z)
-        dTdz_list.append(dTdz)
-        dSdz_list.append(dSdz)
-        drhodz_list.append(drhodz)
+        if dt_list:
+            d_t_all = np.concatenate(dt_list)
+            d_z_all = np.concatenate(dz_list)
+            dTdz_all = np.concatenate(dTdz_list)
+            dSdz_all = np.concatenate(dSdz_list)
+            drhodz_all = np.concatenate(drhodz_list)
 
-    if dt_list:
-        d_t_all = np.concatenate(dt_list)
-        d_z_all = np.concatenate(dz_list)
-        dTdz_all = np.concatenate(dTdz_list)
-        dSdz_all = np.concatenate(dSdz_list)
-        drhodz_all = np.concatenate(drhodz_list)
+            fig4, axes4 = plt.subplots(3, 1, figsize=(16, 10), constrained_layout=True,
+                                       sharex=True, sharey=True)
+            fig4.suptitle(f"{glider} \u2014 CTD Derivatives (per meter)",
+                          fontsize=14, fontweight="bold")
 
-        fig4, axes4 = plt.subplots(3, 1, figsize=(16, 10), constrained_layout=True,
-                                   sharex=True, sharey=True)
-        fig4.suptitle(f"{glider} \u2014 CTD Derivatives (per meter)",
-                      fontsize=14, fontweight="bold")
+            # Scale to milli-units; compute color limits from data below 125 m
+            deep = d_z_all > 125
 
-        # Scale to milli-units; compute color limits from data below 125 m
-        deep = d_z_all > 125
+            derivatives = [
+                (dTdz_all * 1000, "viridis", "$dT/dz$ (m\N{DEGREE SIGN}C/m)"),
+                (dSdz_all * 1000, "viridis", r"$dS_{P}/dz$ (mPSU/m)"),
+                (drhodz_all * 1000, "viridis", r"$d\rho/dz$ (g/m$^3$/m)"),
+            ]
 
-        derivatives = [
-            (dTdz_all * 1000, "viridis", "$dT/dz$ (m\N{DEGREE SIGN}C/m)"),
-            (dSdz_all * 1000, "viridis", r"$dS_{P}/dz$ (mPSU/m)"),
-            (drhodz_all * 1000, "viridis", r"$d\rho/dz$ (g/m$^3$/m)"),
-        ]
+            for ax4, (ddata, cmap, clabel) in zip(axes4, derivatives):
+                deep_vals = ddata[deep]
+                deep_vals = deep_vals[np.isfinite(deep_vals)]
+                if len(deep_vals) > 0:
+                    vmin = np.nanquantile(deep_vals, 0.05)
+                    vmax = np.nanquantile(deep_vals, 0.95)
+                    linthresh = np.nanmedian(np.abs(deep_vals))
+                    norm = SymLogNorm(linthresh=linthresh, vmin=vmin, vmax=vmax)
+                else:
+                    norm = None
+                colored_line(ax4, fig4, d_t_all, d_z_all, ddata, cmap, clabel,
+                             norm=norm, max_gap_s=ctd_gap4)
+                ax4.set_ylabel("Depth (m)")
 
-        for ax4, (ddata, cmap, clabel) in zip(axes4, derivatives):
-            deep_vals = ddata[deep]
-            deep_vals = deep_vals[np.isfinite(deep_vals)]
-            if len(deep_vals) > 0:
-                vmin = np.nanquantile(deep_vals, 0.05)
-                vmax = np.nanquantile(deep_vals, 0.95)
-                linthresh = np.nanmedian(np.abs(deep_vals))
-                norm = SymLogNorm(linthresh=linthresh, vmin=vmin, vmax=vmax)
-            else:
-                norm = None
-            colored_line(ax4, fig4, d_t_all, d_z_all, ddata, cmap, clabel,
-                         norm=norm, max_gap_s=ctd_gap4)
-            ax4.set_ylabel("Depth (m)")
+            axes4[-1].set_xlabel("Time (UTC)")
 
-        axes4[-1].set_xlabel("Time (UTC)")
-
-        # Link figure 4 axes to figure 3 top panels (time and depth)
-        axes4[0].sharex(ax_top1)
-        axes4[0].sharey(ax_top1)
-
-        for ax4 in axes4:
-            for lbl in ax4.get_xticklabels():
-                lbl.set_rotation(30)
-                lbl.set_ha("right")
+            for ax4 in axes4:
+                for lbl in ax4.get_xticklabels():
+                    lbl.set_rotation(30)
+                    lbl.set_ha("right")
 
     plt.show()
+
+
+def _parse_figures(value):
+    """Parse a figure spec: e.g. '1', '1,3', '1-3', '1 2 4'."""
+    figs = set()
+    for part in value.replace(",", " ").split():
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            figs.update(range(int(lo), int(hi) + 1))
+        else:
+            figs.add(int(part))
+    return figs
 
 
 def main():
@@ -827,10 +845,19 @@ def main():
                         help="Glider names to process (default: osu684 osu685)")
     parser.add_argument("--basedir", default=".",
                         help="Base directory containing NetCDF files (default: .)")
+    parser.add_argument("--figure", nargs="+",
+                        help="Figures to display: 1-4, e.g. --figure 1 3 or --figure 1-3 or --figure 2,4")
     args = parser.parse_args()
 
+    if args.figure:
+        figures = set()
+        for v in args.figure:
+            figures |= _parse_figures(v)
+    else:
+        figures = None  # all figures
+
     for glider in args.gliders:
-        generate_figures(glider, args.basedir)
+        generate_figures(glider, args.basedir, figures=figures)
 
 
 if __name__ == "__main__":

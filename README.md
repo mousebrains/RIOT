@@ -69,7 +69,7 @@ Syncs raw glider data from a dockserver via rsync and converts it to NetCDF file
 Generates interactive diagnostic figures from the NetCDF files produced by `syncit`.
 
 ```sh
-./examine.py [--gliders NAME ...] [--basedir DIR]
+./examine.py [--gliders NAME ...] [--basedir DIR] [--figure FIGS ...]
 ```
 
 **Options:**
@@ -78,6 +78,7 @@ Generates interactive diagnostic figures from the NetCDF files produced by `sync
 |--------|---------|-------------|
 | `--gliders` | `osu684 osu685` | Glider names to process |
 | `--basedir` | `.` | Directory containing the NetCDF files |
+| `--figure` | all | Figures to display (1-4). Accepts multiple values, ranges, or comma-separated lists (e.g. `--figure 1 3`, `--figure 1-3`, `--figure 2,4`) |
 
 **Figures produced (per glider):**
 
