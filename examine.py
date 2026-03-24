@@ -694,6 +694,155 @@ def _figure_flight_health(glider, flt):
     return fig
 
 
+def _color_yaxis(ax, color):
+    """Color an axis's y-label and tick labels."""
+    ax.yaxis.label.set_color(color)
+    ax.tick_params(axis="y", colors=color)
+
+
+def _figure_flight_control(glider, flt, sci):
+    """Figure 6: Pitch/Roll vs battery position, and oil volume vs vertical speed."""
+    fig, axes = plt.subplots(3, 1, figsize=(16, 10), constrained_layout=True,
+                              sharex=True)
+    fig.suptitle(f"{glider} \u2014 Flight Control", fontsize=14, fontweight="bold")
+
+    t = flt["t_dt"]
+
+    # Pitch (left) and battery position (right)
+    ax = axes[0]
+    mask = np.isfinite(flt["m_pitch"])
+    ax.plot(t[mask], np.degrees(flt["m_pitch"][mask]), ".", markersize=1.5, color="tab:blue")
+    ax.grid(True)
+    ax.set_ylabel("Pitch (deg)")
+    _color_yaxis(ax, "tab:blue")
+    ax2 = ax.twinx()
+    bp_mask = np.isfinite(flt["m_battpos"])
+    ax2.plot(t[bp_mask], flt["m_battpos"][bp_mask], ".", markersize=1.5, color="tab:red")
+    ax2.set_ylabel("Battery Position (in)")
+    _color_yaxis(ax2, "tab:red")
+
+    # Roll (left) and depth (right)
+    ax = axes[1]
+    mask = np.isfinite(flt["m_roll"])
+    ax.plot(t[mask], np.degrees(flt["m_roll"][mask]), ".", markersize=1.5, color="tab:orange")
+    ax.grid(True)
+    ax.set_ylabel("Roll (deg)")
+    roll_deg = np.degrees(flt["m_roll"][mask])
+    rlim = max(abs(np.nanpercentile(roll_deg, 1)), abs(np.nanpercentile(roll_deg, 99)))
+    ax.set_ylim(-rlim, rlim)
+    _color_yaxis(ax, "tab:orange")
+    ax2 = ax.twinx()
+    depth_mask = np.isfinite(sci["depth"])
+    ax2.plot(sci["t_dt"][depth_mask], sci["depth"][depth_mask], ".", markersize=1.5, color="tab:red")
+    ax2.set_ylabel("Depth (m)")
+    ax2.invert_yaxis()
+    _color_yaxis(ax2, "tab:red")
+
+    # Vertical speed (left) and oil volume (right)
+    # Compute dz/dt from CTD depth and time
+    depth = sci["depth"]
+    sci_epoch = _dt64_to_epoch(sci["t_dt"])
+    dmask = np.isfinite(depth) & np.isfinite(sci_epoch)
+    d_ok = depth[dmask]
+    t_ok = sci_epoch[dmask]
+    dzdt = np.diff(d_ok) / np.diff(t_ok)
+    dzdt_t = sci["t_dt"][dmask][1:]  # midpoint times (use end of each interval)
+
+    ax = axes[2]
+    ax.plot(dzdt_t, dzdt, ".", markersize=1.5, color="tab:purple")
+    ax.grid(True)
+    ax.set_ylabel("Vertical Speed (m/s)")
+    ax.set_xlabel("Time (UTC)")
+    _color_yaxis(ax, "tab:purple")
+    ax2 = ax.twinx()
+    oil_mask = np.isfinite(flt["m_de_oil_vol"])
+    ax2.plot(t[oil_mask], flt["m_de_oil_vol"][oil_mask], ".", markersize=1.5, color="tab:green")
+    ax2.set_ylabel("Oil Volume (cc)")
+    _color_yaxis(ax2, "tab:green")
+
+    _rotate_xlabels(axes)
+    return fig
+
+
+def _figure_depth_overview(glider, flt, sci, mri, mri_depth, mean_lat):
+    """Figure 7: Depth panels colored by density, oil volume, and epsilon."""
+    from matplotlib.gridspec import GridSpec
+    fig = plt.figure(figsize=(16, 12), constrained_layout=True)
+    fig.suptitle(f"{glider} \u2014 Depth Overview", fontsize=14, fontweight="bold")
+    gs = GridSpec(3, 2, figure=fig)
+
+    ax_top = fig.add_subplot(gs[0, :])
+    ax_mid = fig.add_subplot(gs[1, :], sharex=ax_top, sharey=ax_top)
+    ax_e1 = fig.add_subplot(gs[2, 0], sharex=ax_top, sharey=ax_top)
+    ax_e2 = fig.add_subplot(gs[2, 1], sharex=ax_top, sharey=ax_top)
+    depth_axes = [ax_top, ax_mid, ax_e1, ax_e2]
+
+    t = flt["t_dt"]
+
+    # --- Top: depth colored by density, battery position (right) ---
+    rho_mask = np.isfinite(sci["rho"]) & (sci["rho"] >= 1020)
+    colored_line(ax_top, fig, sci["t_dt"][rho_mask], sci["depth"][rho_mask],
+                 sci["rho"][rho_mask] - 1000, "viridis",
+                 r"$\rho$ − 1000 (kg/m³)", lw=2, invert_yaxis=False)
+    ax_top.set_ylabel("Depth (m)")
+    ax_top_r = ax_top.twinx()
+    bp_mask = np.isfinite(flt["m_battpos"])
+    ax_top_r.plot(t[bp_mask], flt["m_battpos"][bp_mask], ".", markersize=1.5, color="tab:red")
+    ax_top_r.set_ylabel("Battery Position (in)")
+    _color_yaxis(ax_top_r, "tab:red")
+
+    # --- Middle: depth colored by oil volume, pitch (right) ---
+    oil = flt["m_de_oil_vol"]
+    flt_epoch = _dt64_to_epoch(t)
+    sci_epoch = _dt64_to_epoch(sci["t_dt"])
+    sci_depth_valid = np.isfinite(sci["depth"]) & np.isfinite(sci_epoch)
+    flt_depth_interp = np.interp(flt_epoch, sci_epoch[sci_depth_valid],
+                                  sci["depth"][sci_depth_valid])
+    oil_depth_mask = np.isfinite(oil) & np.isfinite(flt_depth_interp)
+    colored_line(ax_mid, fig, t[oil_depth_mask], flt_depth_interp[oil_depth_mask],
+                 oil[oil_depth_mask], "viridis", "Oil Volume (cc)", lw=2,
+                 invert_yaxis=False)
+    ax_mid.set_ylabel("Depth (m)")
+    ax_mid_r = ax_mid.twinx()
+    pitch_mask = np.isfinite(flt["m_pitch"])
+    ax_mid_r.plot(t[pitch_mask], np.degrees(flt["m_pitch"][pitch_mask]), ".",
+                  markersize=1.5, color="tab:red")
+    ax_mid_r.set_ylabel("Pitch (deg)")
+    _color_yaxis(ax_mid_r, "tab:red")
+
+    # Epsilon color normalization: q05–q95 for data below 125 m
+    deep = mri_depth > 125
+    deep_eps = np.concatenate([mri["e1_med"][deep], mri["e2_med"][deep]])
+    deep_eps = deep_eps[np.isfinite(deep_eps)]
+    eps_norm = plt.Normalize(np.nanquantile(deep_eps, 0.05),
+                              np.nanquantile(deep_eps, 0.95))
+
+    # --- Bottom left: depth colored by epsilon_1 ---
+    lc1 = colored_line(ax_e1, fig, mri["t"], mri_depth, mri["e1_med"], "viridis",
+                        None, norm=eps_norm, max_gap_s=mri["max_gap_s"],
+                        colorbar=False, lw=2, invert_yaxis=False)
+    ax_e1.set_ylabel("Depth (m)")
+    ax_e1.set_xlabel("Time (UTC)")
+    ax_e1.set_title(r"$\epsilon_1$ median")
+
+    # --- Bottom right: depth colored by epsilon_2 ---
+    lc2 = colored_line(ax_e2, fig, mri["t"], mri_depth, mri["e2_med"], "viridis",
+                        None, norm=eps_norm, max_gap_s=mri["max_gap_s"],
+                        colorbar=False, lw=2, invert_yaxis=False)
+    ax_e2.set_xlabel("Time (UTC)")
+    ax_e2.set_title(r"$\epsilon_2$ median")
+
+    if lc1 is not None:
+        cb = fig.colorbar(lc1, ax=[ax_e1, ax_e2], location="right", shrink=0.8)
+        cb.set_label(r"$\log_{10}(\epsilon)$ median (W/kg)")
+
+    # Invert depth axis (shared, so only need to do it once)
+    ax_top.invert_yaxis()
+
+    _rotate_xlabels(depth_axes)
+    return fig
+
+
 # =========================================================================
 # MRI data loading
 # =========================================================================
@@ -761,16 +910,20 @@ def _load_mri(basedir, glider, mission_start):
 def generate_figures(glider, basedir, figures=None):
     """Generate diagnostic figures for a single glider.
 
-    figures: set of figure numbers to generate (1-4), or None for all.
+    figures: set of figure numbers to generate, or None for all.
     """
+    # Dataset requirements per figure
+    _NEEDS_MRI = {2, 3, 7}
+    ALL_FIGURES = {1, 2, 3, 4, 5, 6, 7}
+
     if figures is None:
-        figures = {1, 2, 3, 4, 5}
+        figures = ALL_FIGURES
     print(f"Processing {glider}...")
 
     # --- Load data (parallel I/O) ---
     flt_vars = ("m_present_secs_into_mission", "m_lat", "m_lon",
                 "m_water_depth", "m_pitch", "m_roll", "m_battery",
-                "m_thruster_power")
+                "m_thruster_power", "m_battpos", "m_de_oil_vol")
     sci_vars = ("sci_water_pressure", "sci_water_cond", "sci_water_temp")
     with ThreadPoolExecutor(max_workers=2) as executor:
         f_flt = executor.submit(load_nc, os.path.join(basedir, f"{glider}.flt.nc"),
@@ -815,53 +968,64 @@ def generate_figures(glider, basedir, figures=None):
     pitch_deg = pitch_deg[np.isfinite(pitch_deg)]
     roll_deg = roll_deg[np.isfinite(roll_deg)]
 
+    # --- Load MRI data if any requested figure needs it ---
+    mri = None
+    mri_depth = None
+    mean_lat = None
+    if figures & _NEEDS_MRI:
+        mri = _load_mri(basedir, glider, mission_start)
+        if mri is not None:
+            mean_lat = np.nanmean(gps_lat)
+            mri_depth = -gsw.z_from_p(mri["pressure"], mean_lat)
+
     # --- Figure 1: CTD & Flight ---
     if 1 in figures:
         _figure_ctd_flight(glider, basedir, merged, ctd_gap_s,
                            wd_t, wd_depth, pitch_deg, roll_deg, sci)
 
-    # --- Load MRI data (needed by figures 2 and 3 only) ---
-    mri = None
-    if figures & {2, 3}:
-        mri = _load_mri(basedir, glider, mission_start)
+    # --- Figure 2: Turbulence ---
+    if 2 in figures and mri is not None:
+        _figure_turbulence(glider, mri)
 
-    if mri is not None:
-        if 2 in figures:
-            _figure_turbulence(glider, mri)
+    # --- Figure 3: Profile Walker ---
+    if 3 in figures and mri is not None:
+        prof_data = []
+        for s, e in zip(mri["profile_starts"], mri["profile_ends"]):
+            sl = slice(s, e)
+            t_s, t_e = mri["t"][s], mri["t"][e - 1]
+            cmask = (merged["t_dt"] >= t_s) & (merged["t_dt"] <= t_e)
+            prof_data.append({
+                "t_start": t_s, "t_end": t_e,
+                "depth": mri_depth[sl],
+                "e1": mri["e1_med"][sl], "e2": mri["e2_med"][sl],
+                "ctd_depth": merged["depth"][cmask] if cmask.any() else np.array([]),
+                "temp":      merged["temp"][cmask]  if cmask.any() else np.array([]),
+                "SP":        merged["SP"][cmask]    if cmask.any() else np.array([]),
+            })
 
-        if 3 in figures:
-            mean_lat = np.nanmean(gps_lat)
-            mri_depth = -gsw.z_from_p(mri["pressure"], mean_lat)
+        if len(prof_data) == 0:
+            print(f"  No MRI profiles for {glider}, skipping profile walker")
+        else:
+            _figure_profile_walker(glider, mri["t"], mri_depth,
+                                   mri["e1_med"], mri["e2_med"],
+                                   prof_data, mri["eps_norm"],
+                                   mri["max_gap_s"])
 
-            prof_data = []
-            for s, e in zip(mri["profile_starts"], mri["profile_ends"]):
-                sl = slice(s, e)
-                t_s, t_e = mri["t"][s], mri["t"][e - 1]
-                cmask = (merged["t_dt"] >= t_s) & (merged["t_dt"] <= t_e)
-                prof_data.append({
-                    "t_start": t_s, "t_end": t_e,
-                    "depth": mri_depth[sl],
-                    "e1": mri["e1_med"][sl], "e2": mri["e2_med"][sl],
-                    "ctd_depth": merged["depth"][cmask] if cmask.any() else np.array([]),
-                    "temp":      merged["temp"][cmask]  if cmask.any() else np.array([]),
-                    "SP":        merged["SP"][cmask]    if cmask.any() else np.array([]),
-                })
-
-            if len(prof_data) == 0:
-                print(f"  No MRI profiles for {glider}, skipping profile walker")
-            else:
-                _figure_profile_walker(glider, mri["t"], mri_depth,
-                                       mri["e1_med"], mri["e2_med"],
-                                       prof_data, mri["eps_norm"],
-                                       mri["max_gap_s"])
-
-    # --- Figure 4: CTD Derivatives (does NOT require MRI) ---
+    # --- Figure 4: CTD Derivatives ---
     if 4 in figures:
         _figure_ctd_derivatives(glider, merged)
 
     # --- Figure 5: Flight Health ---
     if 5 in figures:
         _figure_flight_health(glider, flt)
+
+    # --- Figure 6: Flight Control ---
+    if 6 in figures:
+        _figure_flight_control(glider, flt, sci)
+
+    # --- Figure 7: Depth Overview ---
+    if 7 in figures and mri is not None:
+        _figure_depth_overview(glider, flt, sci, mri, mri_depth, mean_lat)
 
     plt.show()
 
@@ -885,7 +1049,7 @@ def main():
     parser.add_argument("--basedir", default=".",
                         help="Base directory containing NetCDF files (default: .)")
     parser.add_argument("--figure", nargs="+",
-                        help="Figures to display: 1-5, e.g. --figure 1 3 or --figure 1-3 or --figure 2,4")
+                        help="Figures to display: 1-7, e.g. --figure 1 3 or --figure 1-3 or --figure 2,4")
     args = parser.parse_args()
 
     if args.figure:
