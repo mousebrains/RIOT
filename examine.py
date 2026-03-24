@@ -654,6 +654,46 @@ def _figure_ctd_derivatives(glider, merged):
     return fig
 
 
+def _figure_flight_health(glider, flt):
+    """Figure 5: Pitch, Roll, and Battery voltage vs time."""
+    fig, axes = plt.subplots(3, 1, figsize=(16, 10), constrained_layout=True,
+                              sharex=True)
+    fig.suptitle(f"{glider} \u2014 Flight Health", fontsize=14, fontweight="bold")
+
+    t = flt["t_dt"]
+
+    # Pitch
+    ax = axes[0]
+    mask = np.isfinite(flt["m_pitch"])
+    ax.plot(t[mask], np.degrees(flt["m_pitch"][mask]), ".", markersize=1.5)
+    ax.grid(True)
+    ax.set_ylabel("Pitch (deg)")
+
+    # Roll
+    ax = axes[1]
+    mask = np.isfinite(flt["m_roll"])
+    ax.plot(t[mask], np.degrees(flt["m_roll"][mask]), ".", markersize=1.5, color="tab:orange")
+    ax.grid(True)
+    ax.set_ylabel("Roll (deg)")
+
+    # Thruster power on right y-axis
+    ax2 = ax.twinx()
+    tp_mask = np.isfinite(flt["m_thruster_power"])
+    ax2.plot(t[tp_mask], flt["m_thruster_power"][tp_mask], ".", markersize=1.5, color="tab:red")
+    ax2.set_ylabel("Thruster Power (W)")
+
+    # Battery
+    ax = axes[2]
+    mask = np.isfinite(flt["m_battery"])
+    ax.plot(t[mask], flt["m_battery"][mask], ".", markersize=1.5, color="tab:green")
+    ax.grid(True)
+    ax.set_ylabel("Battery (V)")
+    ax.set_xlabel("Time (UTC)")
+
+    _rotate_xlabels(axes)
+    return fig
+
+
 # =========================================================================
 # MRI data loading
 # =========================================================================
@@ -724,12 +764,13 @@ def generate_figures(glider, basedir, figures=None):
     figures: set of figure numbers to generate (1-4), or None for all.
     """
     if figures is None:
-        figures = {1, 2, 3, 4}
+        figures = {1, 2, 3, 4, 5}
     print(f"Processing {glider}...")
 
     # --- Load data (parallel I/O) ---
     flt_vars = ("m_present_secs_into_mission", "m_lat", "m_lon",
-                "m_water_depth", "m_pitch", "m_roll")
+                "m_water_depth", "m_pitch", "m_roll", "m_battery",
+                "m_thruster_power")
     sci_vars = ("sci_water_pressure", "sci_water_cond", "sci_water_temp")
     with ThreadPoolExecutor(max_workers=2) as executor:
         f_flt = executor.submit(load_nc, os.path.join(basedir, f"{glider}.flt.nc"),
@@ -818,6 +859,10 @@ def generate_figures(glider, basedir, figures=None):
     if 4 in figures:
         _figure_ctd_derivatives(glider, merged)
 
+    # --- Figure 5: Flight Health ---
+    if 5 in figures:
+        _figure_flight_health(glider, flt)
+
     plt.show()
 
 
@@ -840,7 +885,7 @@ def main():
     parser.add_argument("--basedir", default=".",
                         help="Base directory containing NetCDF files (default: .)")
     parser.add_argument("--figure", nargs="+",
-                        help="Figures to display: 1-4, e.g. --figure 1 3 or --figure 1-3 or --figure 2,4")
+                        help="Figures to display: 1-5, e.g. --figure 1 3 or --figure 1-3 or --figure 2,4")
     args = parser.parse_args()
 
     if args.figure:
