@@ -16,7 +16,6 @@ from matplotlib.collections import LineCollection
 from matplotlib.colors import SymLogNorm
 from concurrent.futures import ThreadPoolExecutor
 from scipy.signal import find_peaks
-from scipy.ndimage import median_filter
 from matplotlib.widgets import Button
 from matplotlib.lines import Line2D
 import cmocean
@@ -109,6 +108,8 @@ def load_nc(fn, time_var, variables=None):
         to_read = {v for v in ds.variables if not v.startswith("hdr_")}
     data = {}
     for v in to_read:
+        if v not in ds.variables:
+            continue
         arr = _unmask(ds[v][:])
         if np.issubdtype(arr.dtype, np.integer):
             arr = arr.astype(np.float64)
@@ -420,6 +421,74 @@ def _figure_turbulence(glider, mri):
         ax3.set_title("Spike interval:  " + ",   ".join(spike_parts), fontsize=10)
 
     _rotate_xlabels((ax1, ax2, ax3))
+    return fig
+
+
+def _figure_modem_filter(glider, mri):
+    """Figure 8: Despike — tagged vs cleaned epsilon."""
+    t = mri["t"]
+    e1 = mri["e1"]
+    e2 = mri["e2"]
+    dirty = mri["contaminated"]
+    clean = ~dirty
+    n_dirty = dirty.sum()
+    n_total = len(dirty)
+
+    fig = plt.figure(figsize=(14, 8))
+    fig.suptitle(
+        f"{glider} — Despike "
+        f"({n_dirty} of {n_total} tagged, {100 * n_dirty / n_total:.1f}%)",
+        fontsize=14, fontweight="bold")
+    gs = fig.add_gridspec(2, 2, hspace=0.35, wspace=0.25)
+    ax_tl = fig.add_subplot(gs[0, 0])
+    ax_tr = fig.add_subplot(gs[0, 1], sharex=ax_tl, sharey=ax_tl)
+    ax_bot = fig.add_subplot(gs[1, :], sharex=ax_tl, sharey=ax_tl)
+
+    for s, e in zip(mri["profile_starts"], mri["profile_ends"]):
+        sl = slice(s, e)
+        first = s == 0
+
+        # Top-left: e1 all data with dirty highlighted
+        ax_tl.plot(t[sl], e1[sl], ".-", markersize=2, color="tab:blue",
+                   label="all" if first else None)
+        d = dirty[sl]
+        if d.any():
+            ax_tl.plot(t[sl][d], e1[sl][d], "o",
+                       markersize=3, color="tab:red", alpha=0.6,
+                       label="tagged" if first else None)
+
+        # Top-right: e2 all data with dirty highlighted
+        ax_tr.plot(t[sl], e2[sl], ".-", markersize=2, color="tab:orange",
+                   label="all" if first else None)
+        if d.any():
+            ax_tr.plot(t[sl][d], e2[sl][d], "o",
+                       markersize=3, color="tab:red", alpha=0.6,
+                       label="tagged" if first else None)
+
+        # Bottom: both epsilons cleaned
+        c = clean[sl]
+        if c.any():
+            ax_bot.plot(t[sl][c], e1[sl][c], ".-", markersize=2,
+                        color="tab:blue",
+                        label=r"$\epsilon_1$" if first else None)
+            ax_bot.plot(t[sl][c], e2[sl][c], ".-", markersize=2,
+                        color="tab:orange",
+                        label=r"$\epsilon_2$" if first else None)
+
+    ax_tl.set_title(r"$\epsilon_1$ — Tagged")
+    ax_tr.set_title(r"$\epsilon_2$ — Tagged")
+    ax_bot.set_title("Filtered")
+
+    for ax in (ax_tl, ax_tr, ax_bot):
+        ax.grid(True)
+    ax_bot.set_xlabel("Time (UTC)")
+    for ax in (ax_tl, ax_bot):
+        ax.set_ylabel(r"$\log_{10}(\epsilon)$ (W/kg)")
+    ax_tl.legend(loc="upper left", fontsize=8)
+    ax_tr.legend(loc="upper left", fontsize=8)
+    ax_bot.legend(loc="upper left", fontsize=8)
+
+    _rotate_xlabels((ax_tl, ax_tr, ax_bot))
     return fig
 
 
@@ -847,7 +916,128 @@ def _figure_depth_overview(glider, flt, sci, mri, mri_depth, mean_lat):
 # MRI data loading
 # =========================================================================
 
-def _load_mri(basedir, glider, mission_start):
+_SPIKE_FACTOR = np.log10(2)  # factor of 2 in linear space
+_MODEM_WINDOW = 24  # seconds: points within this of a modem ping are non-anchor
+_MODEM_STATES = (4, 5, 10)
+
+
+def _modem_active_times(sci):
+    """Extract sorted unique POSIX times when the acoustic modem is active."""
+    for var in ("sci_generic_a", "sci_generic_b", "sci_generic_c", "sci_generic_k"):
+        if var not in sci:
+            return np.array([])
+    a, b, c, k = (sci[v] for v in
+                   ("sci_generic_a", "sci_generic_b", "sci_generic_c", "sci_generic_k"))
+    valid = (a > 100) & (b >= 0) & (c < 1000)
+    if not np.any(valid):
+        return np.array([])
+    ping_posix = a[valid] * 86400.0 + b[valid] + c[valid] / 1000.0
+    active = np.isin(k[valid], _MODEM_STATES)
+    if not np.any(active):
+        return np.array([])
+    return np.unique(ping_posix[active])
+
+
+def _near_modem(mri_posix, modem_times, half_window):
+    """Boolean mask: True if measurement is within half_window of any modem ping."""
+    idx = np.searchsorted(modem_times, mri_posix)
+    idx_l = np.clip(idx - 1, 0, len(modem_times) - 1)
+    idx_r = np.clip(idx, 0, len(modem_times) - 1)
+    return np.minimum(np.abs(mri_posix - modem_times[idx_l]),
+                      np.abs(mri_posix - modem_times[idx_r])) <= half_window
+
+
+def _despike_anchors(e1, e2, is_anchor, profile_starts, profile_ends,
+                     factor_log):
+    """Iteratively despike anchor points among themselves."""
+    n = len(e1)
+    bad = np.zeros(n, dtype=bool)
+    for _ in range(100):
+        new_flags = np.zeros(n, dtype=bool)
+        for s, e in zip(profile_starts, profile_ends):
+            valid = [i for i in range(s, e) if is_anchor[i] and not bad[i]]
+            if len(valid) < 3:
+                continue
+            for eps in [e1, e2]:
+                vals = np.array([eps[i] for i in valid])
+                for j in range(1, len(valid) - 1):
+                    if (vals[j] - vals[j - 1] > factor_log
+                            and vals[j] - vals[j + 1] > factor_log):
+                        new_flags[valid[j]] = True
+        if not np.any(new_flags & ~bad):
+            break
+        bad |= new_flags
+    return bad
+
+
+def _flood_fill(e1, e2, clean_anchor, profile_starts, profile_ends,
+                factor_log):
+    """Walk outward from clean anchors, accepting points within factor_log.
+
+    For each profile, walk forward and backward from anchor points.  A
+    non-anchor point is accepted if **both** its e1 and e2 values are
+    within ``factor_log`` of the last accepted point on that side.
+    Points not reached (or that spike above the walk) are flagged.
+    """
+    n = len(e1)
+    accepted = clean_anchor.copy()
+
+    for s, e in zip(profile_starts, profile_ends):
+        indices = list(range(s, e))
+        # Forward walk
+        last = -1
+        for i in indices:
+            if accepted[i]:
+                last = i
+                continue
+            if last < 0:
+                continue
+            if all(eps[i] - eps[last] <= factor_log for eps in [e1, e2]):
+                accepted[i] = True
+                last = i
+        # Backward walk
+        last = -1
+        for i in reversed(indices):
+            if accepted[i]:
+                last = i
+                continue
+            if last < 0:
+                continue
+            if all(eps[i] - eps[last] <= factor_log for eps in [e1, e2]):
+                accepted[i] = True
+                last = i
+
+    return ~accepted
+
+
+def _despike(e1, e2, mri_posix, modem_times, profile_starts, profile_ends,
+             factor_log=_SPIKE_FACTOR, modem_window=_MODEM_WINDOW):
+    """Combined modem-anchor + factor-of-2 despike.
+
+    1. Points far from modem activity are *anchors* (high-confidence clean).
+       Anchors are despiked among themselves.
+    2. Walk outward from anchors through the modem-adjacent data, accepting
+       points whose epsilon is within ``factor_log`` of the last accepted
+       neighbor.  Spikes that exceed this are flagged.
+
+    If no modem times are available, all points are treated as anchors
+    and despiked directly.
+    """
+    if len(modem_times) == 0:
+        # No modem data — pure despike (all points are anchors)
+        is_anchor = np.ones(len(e1), dtype=bool)
+    else:
+        is_anchor = ~_near_modem(mri_posix, modem_times, modem_window)
+
+    anchor_bad = _despike_anchors(e1, e2, is_anchor, profile_starts,
+                                  profile_ends, factor_log)
+    clean_anchor = is_anchor & ~anchor_bad
+
+    return _flood_fill(e1, e2, clean_anchor, profile_starts, profile_ends,
+                       factor_log)
+
+
+def _load_mri(basedir, glider, mission_start, modem_times):
     """Load and process MRI data. Returns dict or None if unavailable."""
     mri_fn = os.path.join(basedir, f"{glider}.mri.nc")
     if not os.path.exists(mri_fn):
@@ -881,12 +1071,14 @@ def _load_mri(basedir, glider, mission_start):
     mri_epoch = _dt64_to_epoch(mri_t)
     profile_starts, profile_ends = _find_profiles(mri_epoch)
 
+    # Despike: modem-anchored flood-fill with factor-of-2 neighbor test
+    contaminated = _despike(mri_e1, mri_e2, mri_posix, modem_times,
+                            profile_starts, profile_ends)
+
     mri_e1_med = np.copy(mri_e1)
     mri_e2_med = np.copy(mri_e2)
-    for s, e in zip(profile_starts, profile_ends):
-        sl = slice(s, e)
-        mri_e1_med[sl] = median_filter(mri_e1[sl], size=3)
-        mri_e2_med[sl] = median_filter(mri_e2[sl], size=3)
+    mri_e1_med[contaminated] = np.nan
+    mri_e2_med[contaminated] = np.nan
 
     all_eps = np.concatenate([mri_e1_med, mri_e2_med])
     all_eps = all_eps[np.isfinite(all_eps)]
@@ -898,6 +1090,7 @@ def _load_mri(basedir, glider, mission_start):
         "e1": mri_e1, "e2": mri_e2,
         "e1_med": mri_e1_med, "e2_med": mri_e2_med,
         "epoch": mri_epoch,
+        "contaminated": contaminated,
         "profile_starts": profile_starts, "profile_ends": profile_ends,
         "eps_norm": eps_norm, "max_gap_s": max_gap_s,
     }
@@ -913,8 +1106,8 @@ def generate_figures(glider, basedir, figures=None):
     figures: set of figure numbers to generate, or None for all.
     """
     # Dataset requirements per figure
-    _NEEDS_MRI = {2, 3, 7}
-    ALL_FIGURES = {1, 2, 3, 4, 5, 6, 7}
+    _NEEDS_MRI = {2, 3, 7, 8}
+    ALL_FIGURES = {1, 2, 3, 4, 5, 6, 7, 8}
 
     if figures is None:
         figures = ALL_FIGURES
@@ -924,7 +1117,8 @@ def generate_figures(glider, basedir, figures=None):
     flt_vars = ("m_present_secs_into_mission", "m_lat", "m_lon",
                 "m_water_depth", "m_pitch", "m_roll", "m_battery",
                 "m_thruster_power", "m_battpos", "m_de_oil_vol")
-    sci_vars = ("sci_water_pressure", "sci_water_cond", "sci_water_temp")
+    sci_vars = ("sci_water_pressure", "sci_water_cond", "sci_water_temp",
+                "sci_generic_a", "sci_generic_b", "sci_generic_c", "sci_generic_k")
     with ThreadPoolExecutor(max_workers=2) as executor:
         f_flt = executor.submit(load_nc, os.path.join(basedir, f"{glider}.flt.nc"),
                                 "m_present_time", flt_vars)
@@ -973,7 +1167,8 @@ def generate_figures(glider, basedir, figures=None):
     mri_depth = None
     mean_lat = None
     if figures & _NEEDS_MRI:
-        mri = _load_mri(basedir, glider, mission_start)
+        modem_times = _modem_active_times(sci)
+        mri = _load_mri(basedir, glider, mission_start, modem_times)
         if mri is not None:
             mean_lat = np.nanmean(gps_lat)
             mri_depth = -gsw.z_from_p(mri["pressure"], mean_lat)
@@ -1026,6 +1221,10 @@ def generate_figures(glider, basedir, figures=None):
     # --- Figure 7: Depth Overview ---
     if 7 in figures and mri is not None:
         _figure_depth_overview(glider, flt, sci, mri, mri_depth, mean_lat)
+
+    # --- Figure 8: Modem Filter ---
+    if 8 in figures and mri is not None:
+        _figure_modem_filter(glider, mri)
 
     plt.show()
 
