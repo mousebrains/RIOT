@@ -1,5 +1,7 @@
 *.nc
+*.nc.files
 *.m
+.DS_Store
 __pycache__/
 osu684/
 osu685/
