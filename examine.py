@@ -336,7 +336,7 @@ def _figure_ctd_flight(glider, basedir, merged, ctd_gap_s,
     try:
         blon, blat, bz = fetch_bathymetry(
             track_lon.min(), track_lon.max(), track_lat.min(), track_lat.max(),
-            cache_dir=basedir,
+            pad=1.0, cache_dir=basedir,
         )
         blevels = np.arange(np.floor(bz.min() / 100) * 100, 1, 100)
         ax.contourf(blon, blat, bz, levels=blevels, cmap=cmocean.cm.deep_r,
@@ -346,8 +346,33 @@ def _figure_ctd_flight(glider, basedir, merged, ctd_gap_s,
     except Exception as e:
         print(f"  Warning: could not fetch bathymetry: {e}")
 
-    ax.plot(track_lon, track_lat, "-", color="red", linewidth=1.5,
-            transform=ccrs.PlateCarree())
+    track_t = sci["t_dt"][sci_mask]
+    track_epoch = _dt64_to_epoch(track_t)
+    order = np.argsort(track_epoch)
+    track_lon, track_lat, track_epoch = (
+        track_lon[order], track_lat[order], track_epoch[order],
+    )
+    age_hours = (track_epoch[-1] - track_epoch) / 3600.0
+    points = np.column_stack([track_lon, track_lat])
+    segments = np.stack([points[:-1], points[1:]], axis=1)
+    seg_age = 0.5 * (age_hours[:-1] + age_hours[1:])
+    norm_age = plt.Normalize(0, age_hours[0])
+    lc_map = LineCollection(segments, cmap="plasma_r", norm=norm_age, linewidth=1.5,
+                            transform=ccrs.PlateCarree())
+    lc_map.set_array(seg_age)
+    ax.add_collection(lc_map)
+    cb_map = fig.colorbar(lc_map, ax=ax, shrink=0.8)
+    cb_map.set_label("Age (hours ago)")
+    ax.plot(track_lon[-1], track_lat[-1], "o", color="red", markersize=6,
+            transform=ccrs.PlateCarree(), zorder=5, label="Last position")
+    ax.legend(fontsize=7, loc="lower right")
+    lon_span = track_lon.max() - track_lon.min()
+    lat_span = track_lat.max() - track_lat.min()
+    map_margin = max(lon_span, lat_span) * 0.15 + 0.02
+    ax.set_extent([track_lon.min() - map_margin, track_lon.max() + map_margin,
+                   track_lat.min() - map_margin, track_lat.max() + map_margin],
+                  crs=ccrs.PlateCarree())
+    ax.set_adjustable("datalim")
     ax.add_feature(cfeature.LAND, facecolor="tan")
     ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
     gl = ax.gridlines(draw_labels=True, linewidth=0.5, alpha=0.5)
@@ -850,9 +875,14 @@ def _figure_depth_overview(glider, flt, sci, mri, mri_depth, mean_lat):
 
     # --- Top: depth colored by density, battery position (right) ---
     rho_mask = np.isfinite(sci["rho"]) & (sci["rho"] >= 1020)
-    colored_line(ax_top, fig, sci["t_dt"][rho_mask], sci["depth"][rho_mask],
+    lc_rho = colored_line(ax_top, fig, sci["t_dt"][rho_mask], sci["depth"][rho_mask],
                  sci["rho"][rho_mask] - 1000, "viridis",
-                 r"$\rho$ − 1000 (kg/m³)", lw=2, invert_yaxis=False)
+                 r"$\rho$ − 1000 (kg/m³)", lw=2, invert_yaxis=False,
+                 colorbar=False)
+    if lc_rho is not None:
+        cb_rho = fig.colorbar(lc_rho, ax=ax_top)
+        cb_rho.set_label(r"$\rho$ − 1000 (kg/m³)")
+        cb_rho.ax.invert_yaxis()
     ax_top.set_ylabel("Depth (m)")
     ax_top_r = ax_top.twinx()
     bp_mask = np.isfinite(flt["m_battpos"])
