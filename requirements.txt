@@ -6,4 +6,4 @@ netCDF4
 numpy
 q2netcdf
 scipy
-slocum-tpw
+slocum-tpw>=0.1.5

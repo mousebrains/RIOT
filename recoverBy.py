@@ -30,7 +30,7 @@ WINDOWS = [
 ]
 
 
-def process_glider(ax, glider, basedir):
+def process_glider(ax, glider, basedir, thin=1):
     """Plot recover-by fits for a single glider onto the given axes."""
     fn = os.path.join(basedir, f"{glider}.logs.nc")
     if not os.path.exists(fn):
@@ -46,7 +46,7 @@ def process_glider(ax, glider, basedir):
         return
 
     try:
-        ds = prepare_dataset(fn, sensor=SENSOR)
+        ds = prepare_dataset(fn, sensor=SENSOR, thin=thin)
     except KeyError:
         ax.set_title(f"{glider} \u2014 missing variables")
         return
@@ -156,6 +156,13 @@ def main():
         help="Base directory containing .logs.nc files (default: .)",
     )
     parser.add_argument(
+        "--thin",
+        type=float,
+        default=1,
+        help="Thinning interval in hours; resample bursty data to bin means, "
+        "using within-bin stderr as fit weights (default: 1, 0 to disable)",
+    )
+    parser.add_argument(
         "--output", type=str, help="Save figure to file instead of displaying"
     )
     args = parser.parse_args()
@@ -171,7 +178,7 @@ def main():
     )
 
     for i, glider in enumerate(args.gliders):
-        process_glider(axes[i, 0], glider, args.basedir)
+        process_glider(axes[i, 0], glider, args.basedir, thin=args.thin)
 
     axes[-1, 0].set_xlabel("Time (UTC)")
     fig.suptitle(f"Recover-By Estimates \u2014 {SENSOR}", fontsize=12)
