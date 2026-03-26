@@ -2,8 +2,10 @@
 #
 # Generate a recover-by comparison figure for each glider.
 # Each subplot shows the battery data with linear fits computed over
-# different time windows (1 day, 3 days, 7 days, and full deployment)
-# plus tau-weighted (exponential downweighting) fits.
+# different tau-weighted (exponential downweighting) windows plus
+# an unweighted full-deployment fit.
+#
+# Layout: rows = sensors (charge %, voltage), columns = gliders.
 #
 # Mar-2026, Pat Welch, pat@mousebrains.com
 
@@ -15,9 +17,13 @@ import matplotlib.pyplot as plt
 
 from slocum_tpw.recover_by import FIT_COLORS, fit_recovery, prepare_dataset
 
-SENSOR = "m_lithium_battery_relative_charge"
-THRESHOLD = 15
 CONFIDENCE = 0.95
+
+# (sensor, threshold, ylabel)
+SENSORS = [
+    ("m_lithium_battery_relative_charge", 15, "Battery (%)"),
+    ("m_battery", 13, "Battery (V)"),
+]
 
 # (ndays, tau, label)
 WINDOWS = [
@@ -30,8 +36,8 @@ WINDOWS = [
 ]
 
 
-def process_glider(ax, glider, basedir, thin=1):
-    """Plot recover-by fits for a single glider onto the given axes."""
+def process_subplot(ax, glider, basedir, sensor, threshold, ylabel, thin=1):
+    """Plot recover-by fits for a single glider/sensor onto the given axes."""
     fn = os.path.join(basedir, f"{glider}.logs.nc")
     if not os.path.exists(fn):
         ax.set_title(f"{glider} \u2014 no data")
@@ -46,9 +52,9 @@ def process_glider(ax, glider, basedir, thin=1):
         return
 
     try:
-        ds = prepare_dataset(fn, sensor=SENSOR, thin=thin)
+        ds = prepare_dataset(fn, sensor=sensor, thin=thin)
     except KeyError:
-        ax.set_title(f"{glider} \u2014 missing variables")
+        ax.set_title(f"{glider} \u2014 {sensor} missing")
         return
 
     if ds.time.size < 3:
@@ -58,7 +64,7 @@ def process_glider(ax, glider, basedir, thin=1):
     # Plot raw data
     ax.plot(
         ds.time,
-        ds[SENSOR],
+        ds[sensor],
         ".",
         color="tab:blue",
         markersize=3,
@@ -69,19 +75,19 @@ def process_glider(ax, glider, basedir, thin=1):
 
     # Threshold line
     ax.axhline(
-        y=THRESHOLD,
+        y=threshold,
         color="gray",
         linestyle="--",
         alpha=0.5,
-        label=f"threshold ({THRESHOLD}%)",
+        label=f"threshold ({threshold})",
     )
 
     # Fit each time window
     for win_idx, (ndays, tau, label) in enumerate(WINDOWS):
         result = fit_recovery(
             ds,
-            sensor=SENSOR,
-            threshold=THRESHOLD,
+            sensor=sensor,
+            threshold=threshold,
             confidence=CONFIDENCE,
             ndays=ndays,
             tau=tau,
@@ -118,7 +124,7 @@ def process_glider(ax, glider, basedir, thin=1):
             last_val = float(r["intercept"] + r["slope"] * r["dDays"][-1].item())
             ax.plot(
                 [r["time"][-1].values, r["recovery_date"]],
-                [last_val, THRESHOLD],
+                [last_val, threshold],
                 color=color,
                 linestyle="--",
                 alpha=0.5,
@@ -126,8 +132,8 @@ def process_glider(ax, glider, basedir, thin=1):
                 zorder=2,
             )
 
-    ax.set_ylabel("Battery (%)")
-    ax.set_title(f"{glider} (n={ds.time.size})")
+    ax.set_ylabel(ylabel)
+    ax.set_title(f"{glider} \u2014 {sensor} (n={ds.time.size})")
     ax.legend(fontsize="x-small", loc="upper right")
     ax.grid(True, alpha=0.3)
 
@@ -172,20 +178,32 @@ def main():
         if not args.gliders:
             parser.error(f"No *.logs.nc files found in {args.basedir}")
 
-    n = len(args.gliders)
+    nrows = len(SENSORS)
+    ncols = len(args.gliders)
     fig, axes = plt.subplots(
-        n, 1, figsize=(12, 5 * n), constrained_layout=True, squeeze=False
+        nrows, ncols, figsize=(8 * ncols, 5 * nrows),
+        constrained_layout=True, squeeze=False,
     )
 
-    for i, glider in enumerate(args.gliders):
-        process_glider(axes[i, 0], glider, args.basedir, thin=args.thin)
+    for col, glider in enumerate(args.gliders):
+        for row, (sensor, threshold, ylabel) in enumerate(SENSORS):
+            if row > 0:
+                axes[row, col].sharex(axes[0, col])
+            process_subplot(
+                axes[row, col], glider, args.basedir,
+                sensor, threshold, ylabel, thin=args.thin,
+            )
+        # Hide x-tick labels on all but bottom row
+        for row in range(nrows - 1):
+            axes[row, col].tick_params(labelbottom=False)
 
-    axes[-1, 0].set_xlabel("Time (UTC)")
-    fig.suptitle(f"Recover-By Estimates \u2014 {SENSOR}", fontsize=12)
+    for ax in axes[-1]:
+        ax.set_xlabel("Time (UTC)")
+        for label in ax.get_xticklabels():
+            label.set_rotation(30)
+            label.set_ha("right")
 
-    for label in axes[-1, 0].get_xticklabels():
-        label.set_rotation(30)
-        label.set_ha("right")
+    fig.suptitle("Recover-By Estimates", fontsize=14)
 
     if args.output:
         fig.savefig(args.output)
