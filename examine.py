@@ -788,6 +788,35 @@ def _figure_flight_health(glider, flt):
     return fig
 
 
+def _figure_oil_battpos_hist(glider, flt):
+    """Figure 9: Histograms of oil volume and battery position."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
+    fig.suptitle(f"{glider} \u2014 Oil Volume & Battery Position", fontsize=14, fontweight="bold")
+
+    t = flt["t_dt"]
+    t_range = (_dt64_to_epoch(t[-1]) - _dt64_to_epoch(t[0])) / 86400  # days
+
+    oil = flt["m_de_oil_vol"]
+    mask = np.isfinite(oil)
+    n_oil = mask.sum()
+    ax1.hist(oil[mask], bins=50, edgecolor="black", linewidth=0.5)
+    ax1.set_xlabel("m_de_oil_vol (cc)")
+    ax1.set_ylabel("Count")
+    ax1.set_title(f"Oil Volume ({n_oil / t_range:.1f} pts/day)")
+    ax1.grid(True, alpha=0.3)
+
+    bp = flt["m_battpos"]
+    mask = np.isfinite(bp)
+    n_bp = mask.sum()
+    ax2.hist(bp[mask], bins=50, edgecolor="black", linewidth=0.5, color="tab:orange")
+    ax2.set_xlabel("m_battpos (in)")
+    ax2.set_ylabel("Count")
+    ax2.set_title(f"Battery Position ({n_bp / t_range:.1f} pts/day)")
+    ax2.grid(True, alpha=0.3)
+
+    return fig
+
+
 def _color_yaxis(ax, color):
     """Color an axis's y-label and tick labels."""
     ax.yaxis.label.set_color(color)
@@ -1137,7 +1166,7 @@ def generate_figures(glider, basedir, figures=None):
     """
     # Dataset requirements per figure
     _NEEDS_MRI = {2, 3, 7, 8}
-    ALL_FIGURES = {1, 2, 3, 4, 5, 6, 7, 8}
+    ALL_FIGURES = {1, 2, 3, 4, 5, 6, 7, 8, 9}
 
     if figures is None:
         figures = ALL_FIGURES
@@ -1256,6 +1285,10 @@ def generate_figures(glider, basedir, figures=None):
     if 8 in figures and mri is not None:
         _figure_modem_filter(glider, mri)
 
+    # --- Figure 9: Oil Volume & Battery Position Histograms ---
+    if 9 in figures:
+        _figure_oil_battpos_hist(glider, flt)
+
     plt.show()
 
 
@@ -1278,7 +1311,10 @@ def main():
     parser.add_argument("--basedir", default=".",
                         help="Base directory containing NetCDF files (default: .)")
     parser.add_argument("--figure", nargs="+",
-                        help="Figures to display: 1-7, e.g. --figure 1 3 or --figure 1-3 or --figure 2,4")
+                        help="Figures to display: 1-9, e.g. --figure 1 3 or --figure 1-3 or --figure 2,4. "
+                             "1=CTD & flight, 2=turbulence, 3=profile walker, "
+                             "4=CTD derivatives, 5=flight health, 6=flight control, "
+                             "7=depth overview, 8=modem filter, 9=oil vol & battpos histograms")
     args = parser.parse_args()
 
     if args.figure:
